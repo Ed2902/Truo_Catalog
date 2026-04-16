@@ -4,23 +4,22 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { Request } from 'express';
-import { PrismaService } from '../prisma/prisma.service';
-import { sanitizePlainText } from '../common/utils/sanitize-text.util';
-import { CatalogItemsService } from './catalog-items.service';
-import { CatalogNegotiationPolicyService } from './catalog-negotiation-policy.service';
+} from '@nestjs/common'
+import { Prisma } from '@prisma/client'
+import { Request } from 'express'
+import { PrismaService } from '../prisma/prisma.service'
+import { sanitizePlainText } from '../common/utils/sanitize-text.util'
+import { CatalogItemsService } from './catalog-items.service'
+import { CatalogNegotiationPolicyService } from './catalog-negotiation-policy.service'
 import {
   ExchangeMatchStatus,
   ExchangeProposalStatus,
-} from './catalog.constants';
-import { CreateExchangeProposalDto } from './dto/create-exchange-proposal.dto';
-import { RespondExchangeProposalDto } from './dto/respond-exchange-proposal.dto';
-import { CatalogActor } from './interfaces/catalog-actor.interface';
+} from './catalog.constants'
+import { CreateExchangeProposalDto } from './dto/create-exchange-proposal.dto'
+import { RespondExchangeProposalDto } from './dto/respond-exchange-proposal.dto'
+import { CatalogActor } from './interfaces/catalog-actor.interface'
 
-const PROPOSAL_PUBLIC_RESPONSE_SEPARATOR =
-  '\n\n--- RESPUESTA_PUBLICA ---\n\n';
+const PROPOSAL_PUBLIC_RESPONSE_SEPARATOR = '\n\n--- RESPUESTA_PUBLICA ---\n\n'
 
 const proposalDetailInclude = {
   match: true,
@@ -40,78 +39,81 @@ const proposalDetailInclude = {
       },
     },
   },
-} satisfies Prisma.ExchangeProposalInclude;
+} satisfies Prisma.ExchangeProposalInclude
 
 type ExchangeProposalWithRelations = Prisma.ExchangeProposalGetPayload<{
-  include: typeof proposalDetailInclude;
-}>;
+  include: typeof proposalDetailInclude
+}>
 
 @Injectable()
 export class ExchangeProposalsService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly itemsService: CatalogItemsService,
-    private readonly negotiationPolicyService: CatalogNegotiationPolicyService,
+    private readonly negotiationPolicyService: CatalogNegotiationPolicyService
   ) {}
 
   async createProposal(
     actor: CatalogActor,
     createExchangeProposalDto: CreateExchangeProposalDto,
-    request: Request,
+    request: Request
   ) {
     const sanitizedMessage =
       createExchangeProposalDto.message !== undefined
         ? sanitizePlainText(createExchangeProposalDto.message, {
             preserveNewLines: true,
           })
-        : undefined;
+        : undefined
 
     if (
       createExchangeProposalDto.offeredItemId ===
       createExchangeProposalDto.requestedItemId
     ) {
       throw new BadRequestException(
-        'Offered item and requested item must be different',
-      );
+        'Offered item and requested item must be different'
+      )
     }
 
     const offeredItem = await this.itemsService.getOwnedActiveItemOrThrow(
       actor,
-      createExchangeProposalDto.offeredItemId,
-    );
-    const requestedItem = await this.itemsService.getPublicNegotiableItemOrThrow(
-      createExchangeProposalDto.requestedItemId,
-    );
+      createExchangeProposalDto.offeredItemId
+    )
+    const requestedItem =
+      await this.itemsService.getPublicNegotiableItemOrThrow(
+        createExchangeProposalDto.requestedItemId
+      )
 
     if (requestedItem.ownerUserId === actor.userId) {
-      throw new BadRequestException('You cannot propose an exchange to yourself');
+      throw new BadRequestException(
+        'You cannot propose an exchange to yourself'
+      )
     }
 
     await this.negotiationPolicyService.assertPublicationCanReceiveAnotherOffer(
       requestedItem,
       actor.userId,
       actor,
-      request,
-    );
+      request
+    )
 
     const hasActiveNegotiationForPair = await this.hasActiveNegotiationForPair(
       actor.userId,
       requestedItem.id,
-      offeredItem.id,
-    );
+      offeredItem.id
+    )
 
-    const isPublic = createExchangeProposalDto.isPublic ?? true;
+    const isPublic = createExchangeProposalDto.isPublic ?? true
 
     if (!isPublic && !actor.isPremium) {
       throw new ForbiddenException(
-        'Only premium users can hide exchange proposals from public visibility',
-      );
+        'Only premium users can hide exchange proposals from public visibility'
+      )
     }
 
     if (hasActiveNegotiationForPair) {
       throw new ConflictException(
-        'An active exchange proposal already exists for this pair of items',
-      );
+        'An active exchange proposal already exists for this pair of items'
+      )
     }
 
     const proposal = await this.prismaService.exchangeProposal.create({
@@ -125,42 +127,43 @@ export class ExchangeProposalsService {
         message: sanitizedMessage || null,
       } as never,
       include: proposalDetailInclude,
-    });
+    })
 
-    return this.serializeProposal(proposal);
+    return this.serializeProposal(proposal)
   }
 
   async acceptProposal(actor: CatalogActor, proposalId: string) {
-    const proposal = await this.getProposalOrThrow(proposalId);
+    const proposal = await this.getProposalOrThrow(proposalId)
 
     if (proposal.targetUserId !== actor.userId) {
-      throw new ForbiddenException('Only the target user can accept a proposal');
+      throw new ForbiddenException('Only the target user can accept a proposal')
     }
 
     if (proposal.status !== ExchangeProposalStatus.PENDING) {
-      throw new BadRequestException('Only pending proposals can be accepted');
+      throw new BadRequestException('Only pending proposals can be accepted')
     }
 
-    const acceptedProposalExists = await this.prismaService.exchangeProposal.findFirst({
-      where: {
-        requestedItemId: proposal.requestedItemId,
-        status: ExchangeProposalStatus.ACCEPTED as never,
-        match: {
-          isNot: null,
+    const acceptedProposalExists =
+      await this.prismaService.exchangeProposal.findFirst({
+        where: {
+          requestedItemId: proposal.requestedItemId,
+          status: ExchangeProposalStatus.ACCEPTED as never,
+          match: {
+            isNot: null,
+          },
         },
-      },
-      select: {
-        id: true,
-      },
-    });
+        select: {
+          id: true,
+        },
+      })
 
     if (acceptedProposalExists) {
       throw new ConflictException(
-        'This publication already has an accepted offer and cannot accept another one',
-      );
+        'This publication already has an accepted offer and cannot accept another one'
+      )
     }
 
-    const updatedProposal = await this.prismaService.$transaction(async (tx) => {
+    const updatedProposal = await this.prismaService.$transaction(async tx => {
       const acceptedProposal = await tx.exchangeProposal.update({
         where: {
           id: proposalId,
@@ -169,7 +172,7 @@ export class ExchangeProposalsService {
           status: ExchangeProposalStatus.ACCEPTED as never,
         },
         include: proposalDetailInclude,
-      });
+      })
 
       await tx.exchangeMatch.create({
         data: {
@@ -180,37 +183,37 @@ export class ExchangeProposalsService {
           offeredItemId: acceptedProposal.offeredItemId,
           status: ExchangeMatchStatus.ACTIVE as never,
         },
-      });
+      })
 
       return tx.exchangeProposal.findUniqueOrThrow({
         where: {
           id: proposalId,
         },
         include: proposalDetailInclude,
-      });
-    });
+      })
+    })
 
     await Promise.all([
       this.itemsService.syncNegotiationStatus(updatedProposal.offeredItemId),
       this.itemsService.syncNegotiationStatus(updatedProposal.requestedItemId),
-    ]);
+    ])
 
     if (updatedProposal.match) {
-      this.onMatchLifecycleEvent('match_created', updatedProposal.match.id);
+      this.onMatchLifecycleEvent('match_created', updatedProposal.match.id)
     }
 
-    return this.serializeProposal(updatedProposal);
+    return this.serializeProposal(updatedProposal)
   }
 
   async rejectProposal(actor: CatalogActor, proposalId: string) {
-    const proposal = await this.getProposalOrThrow(proposalId);
+    const proposal = await this.getProposalOrThrow(proposalId)
 
     if (proposal.targetUserId !== actor.userId) {
-      throw new ForbiddenException('Only the target user can reject a proposal');
+      throw new ForbiddenException('Only the target user can reject a proposal')
     }
 
     if (proposal.status !== ExchangeProposalStatus.PENDING) {
-      throw new BadRequestException('Only pending proposals can be rejected');
+      throw new BadRequestException('Only pending proposals can be rejected')
     }
 
     const updatedProposal = await this.prismaService.exchangeProposal.update({
@@ -221,36 +224,37 @@ export class ExchangeProposalsService {
         status: ExchangeProposalStatus.REJECTED as never,
       },
       include: proposalDetailInclude,
-    });
+    })
 
     await Promise.all([
       this.itemsService.syncNegotiationStatus(updatedProposal.offeredItemId),
       this.itemsService.syncNegotiationStatus(updatedProposal.requestedItemId),
-    ]);
+    ])
 
-    return this.serializeProposal(updatedProposal);
+    return this.serializeProposal(updatedProposal)
   }
 
   async cancelProposal(actor: CatalogActor, proposalId: string) {
-    const proposal = await this.getProposalOrThrow(proposalId);
+    const proposal = await this.getProposalOrThrow(proposalId)
 
     if (proposal.requesterUserId !== actor.userId) {
       throw new ForbiddenException(
-        'Only the requester can cancel this proposal',
-      );
+        'Only the requester can cancel this proposal'
+      )
     }
 
     if (
-      ![ExchangeProposalStatus.PENDING, ExchangeProposalStatus.ACCEPTED].includes(
-        proposal.status as ExchangeProposalStatus,
-      )
+      ![
+        ExchangeProposalStatus.PENDING,
+        ExchangeProposalStatus.ACCEPTED,
+      ].includes(proposal.status as ExchangeProposalStatus)
     ) {
       throw new BadRequestException(
-        'Only pending or accepted proposals can be cancelled',
-      );
+        'Only pending or accepted proposals can be cancelled'
+      )
     }
 
-    const updatedProposal = await this.prismaService.$transaction(async (tx) => {
+    const updatedProposal = await this.prismaService.$transaction(async tx => {
       const nextProposal = await tx.exchangeProposal.update({
         where: {
           id: proposalId,
@@ -259,7 +263,7 @@ export class ExchangeProposalsService {
           status: ExchangeProposalStatus.CANCELLED as never,
         },
         include: proposalDetailInclude,
-      });
+      })
 
       if (proposal.status === ExchangeProposalStatus.ACCEPTED) {
         await tx.exchangeMatch.updateMany({
@@ -273,7 +277,7 @@ export class ExchangeProposalsService {
             closedByUserId: actor.userId,
             closeReason: 'cancelled_by_requester',
           },
-        });
+        })
       }
 
       return tx.exchangeProposal.findUniqueOrThrow({
@@ -281,80 +285,81 @@ export class ExchangeProposalsService {
           id: proposalId,
         },
         include: proposalDetailInclude,
-      });
-    });
+      })
+    })
 
     await Promise.all([
       this.itemsService.syncNegotiationStatus(updatedProposal.offeredItemId),
       this.itemsService.syncNegotiationStatus(updatedProposal.requestedItemId),
-    ]);
+    ])
 
-    return this.serializeProposal(updatedProposal);
+    return this.serializeProposal(updatedProposal)
   }
 
   async respondToProposal(
     actor: CatalogActor,
     proposalId: string,
-    respondExchangeProposalDto: RespondExchangeProposalDto,
+    respondExchangeProposalDto: RespondExchangeProposalDto
   ) {
-    const proposal = await this.getProposalOrThrow(proposalId);
+    const proposal = await this.getProposalOrThrow(proposalId)
 
     if (
       proposal.targetUserId !== actor.userId &&
       proposal.requesterUserId !== actor.userId
     ) {
       throw new ForbiddenException(
-        'Only participants can respond publicly to this proposal',
-      );
+        'Only participants can respond publicly to this proposal'
+      )
     }
 
     if (
-      ![ExchangeProposalStatus.PENDING, ExchangeProposalStatus.ACCEPTED].includes(
-        proposal.status as ExchangeProposalStatus,
-      )
+      ![
+        ExchangeProposalStatus.PENDING,
+        ExchangeProposalStatus.ACCEPTED,
+      ].includes(proposal.status as ExchangeProposalStatus)
     ) {
       throw new BadRequestException(
-        'Only pending or accepted proposals can receive a public response',
-      );
+        'Only pending or accepted proposals can receive a public response'
+      )
     }
 
     const sanitizedResponseMessage = sanitizePlainText(
       respondExchangeProposalDto.message,
       {
         preserveNewLines: true,
-      },
-    ).trim();
+      }
+    ).trim()
 
     if (!sanitizedResponseMessage) {
-      throw new BadRequestException('Response message is required');
+      throw new BadRequestException('Response message is required')
     }
 
-    const parsedMessage = this.parseProposalPublicMessage(proposal.message);
+    const parsedMessage = this.parseProposalPublicMessage(proposal.message)
     const existingItemReferences = this.extractResponseItemReferences(
-      parsedMessage.publicResponseMessage,
-    );
+      parsedMessage.publicResponseMessage
+    )
     const nextItemReferences = this.extractResponseItemReferences(
-      sanitizedResponseMessage,
-    );
+      sanitizedResponseMessage
+    )
 
     if (
-      nextItemReferences.some((nextReference) =>
+      nextItemReferences.some(nextReference =>
         existingItemReferences.some(
-          (existingReference) => existingReference.itemId === nextReference.itemId,
-        ),
+          existingReference => existingReference.itemId === nextReference.itemId
+        )
       )
     ) {
       throw new ConflictException(
-        'This product has already been used in this negotiation',
-      );
+        'This product has already been used in this negotiation'
+      )
     }
 
     const actorRoleLabel =
-      actor.userId === proposal.requesterUserId ? 'Solicitante' : 'Dueno';
-    const nextPublicEntry = `${actorRoleLabel}: ${sanitizedResponseMessage}`;
+      actor.userId === proposal.requesterUserId ? 'Solicitante' : 'Dueno'
+    const nextPublicEntry = `${actorRoleLabel}: ${sanitizedResponseMessage}`
     const nextPublicResponseMessage = parsedMessage.publicResponseMessage
       ? `${parsedMessage.publicResponseMessage}\n${nextPublicEntry}`
-      : nextPublicEntry;
+      : nextPublicEntry
 
     const updatedProposal = await this.prismaService.exchangeProposal.update({
       where: {
@@ -363,13 +368,13 @@ export class ExchangeProposalsService {
       data: {
         message: this.composeProposalPublicMessage(
           proposal.message,
-          nextPublicResponseMessage,
+          nextPublicResponseMessage
         ),
       },
       include: proposalDetailInclude,
-    });
+    })
 
-    return this.serializeProposal(updatedProposal);
+    return this.serializeProposal(updatedProposal)
   }
 
   async listMyProposals(actor: CatalogActor) {
@@ -387,14 +392,16 @@ export class ExchangeProposalsService {
       include: proposalDetailInclude,
       orderBy: [{ updatedAt: 'desc' }],
       take: 50,
-    });
+    })
 
-    return Promise.all(proposals.map((proposal) => this.serializeProposal(proposal)));
+    return Promise.all(
+      proposals.map(proposal => this.serializeProposal(proposal))
+    )
   }
 
   async listPublicProposalsForRequestedItem(
     itemId: string,
-    actor?: CatalogActor | null,
+    actor?: CatalogActor | null
   ) {
     const proposals = await this.prismaService.exchangeProposal.findMany({
       where: {
@@ -410,9 +417,11 @@ export class ExchangeProposalsService {
       include: proposalDetailInclude,
       orderBy: [{ updatedAt: 'desc' }],
       take: 50,
-    });
+    })
 
-    return Promise.all(proposals.map((proposal) => this.serializeProposal(proposal)));
+    return Promise.all(
+      proposals.map(proposal => this.serializeProposal(proposal))
+    )
   }
 
   private async getProposalOrThrow(proposalId: string) {
@@ -421,19 +430,19 @@ export class ExchangeProposalsService {
         id: proposalId,
       },
       include: proposalDetailInclude,
-    });
+    })
 
     if (!proposal) {
-      throw new NotFoundException('Exchange proposal not found');
+      throw new NotFoundException('Exchange proposal not found')
     }
 
-    return proposal;
+    return proposal
   }
 
   private async hasActiveNegotiationForPair(
     requesterUserId: string,
     requestedItemId: string,
-    offeredItemId: string,
+    offeredItemId: string
   ) {
     const [pendingProposal, activeMatch] = await Promise.all([
       this.prismaService.exchangeProposal.findFirst({
@@ -466,13 +475,15 @@ export class ExchangeProposalsService {
           id: true,
         },
       }),
-    ]);
+    ])
 
-    return Boolean(pendingProposal || activeMatch);
+    return Boolean(pendingProposal || activeMatch)
   }
 
   private async serializeProposal(proposal: ExchangeProposalWithRelations) {
-    const parsedPublicMessage = this.parseProposalPublicMessage(proposal.message);
+    const parsedPublicMessage = this.parseProposalPublicMessage(
+      proposal.message
+    )
 
     return {
       id: proposal.id,
@@ -480,8 +491,9 @@ export class ExchangeProposalsService {
       targetUserId: proposal.targetUserId,
       requestedItemId: proposal.requestedItemId,
       offeredItemId: proposal.offeredItemId,
-      isPublic: (proposal as ExchangeProposalWithRelations & { isPublic?: boolean })
-        .isPublic ?? true,
+      isPublic:
+        (proposal as ExchangeProposalWithRelations & { isPublic?: boolean })
+          .isPublic ?? true,
       status: proposal.status,
       message: proposal.message,
       proposalMessage: parsedPublicMessage.proposalMessage,
@@ -503,13 +515,10 @@ export class ExchangeProposalsService {
         : null,
       requestedItem: this.serializeProposalItem(proposal.requestedItem),
       offeredItem: this.serializeProposalItem(proposal.offeredItem),
-    };
+    }
   }
 
-  private onMatchLifecycleEvent(
-    _event: 'match_created',
-    _matchId: string,
-  ) {
+  private onMatchLifecycleEvent(_event: 'match_created', _matchId: string) {
     // Hook reserved for Fase 3+: chat, reputacion y notificaciones basadas en eventos de match.
   }
 
@@ -518,77 +527,79 @@ export class ExchangeProposalsService {
       return {
         proposalMessage: null,
         publicResponseMessage: null,
-      };
+      }
     }
 
-    const separatorIndex = message.indexOf(PROPOSAL_PUBLIC_RESPONSE_SEPARATOR);
+    const separatorIndex = message.indexOf(PROPOSAL_PUBLIC_RESPONSE_SEPARATOR)
 
     if (separatorIndex === -1) {
       return {
         proposalMessage: message.trim() || null,
         publicResponseMessage: null,
-      };
+      }
     }
 
-    const proposalMessage = message.slice(0, separatorIndex).trim() || null;
+    const proposalMessage = message.slice(0, separatorIndex).trim() || null
     const publicResponseMessage =
       message
         .slice(separatorIndex + PROPOSAL_PUBLIC_RESPONSE_SEPARATOR.length)
-        .trim() || null;
+        .trim() || null
 
     return {
       proposalMessage,
       publicResponseMessage,
-    };
+    }
   }
 
   private composeProposalPublicMessage(
     currentMessage: string | null,
-    publicResponseMessage: string,
+    publicResponseMessage: string
   ) {
-    const parsed = this.parseProposalPublicMessage(currentMessage);
+    const parsed = this.parseProposalPublicMessage(currentMessage)
 
     if (!parsed.proposalMessage) {
-      return `${PROPOSAL_PUBLIC_RESPONSE_SEPARATOR}${publicResponseMessage}`.trim();
+      return `${PROPOSAL_PUBLIC_RESPONSE_SEPARATOR}${publicResponseMessage}`.trim()
     }
 
-    return `${parsed.proposalMessage}${PROPOSAL_PUBLIC_RESPONSE_SEPARATOR}${publicResponseMessage}`;
+    return `${parsed.proposalMessage}${PROPOSAL_PUBLIC_RESPONSE_SEPARATOR}${publicResponseMessage}`
   }
 
   private extractResponseItemReferences(message?: string | null) {
     if (!message) {
-      return [];
+      return []
     }
 
     const references = [...message.matchAll(/\[\[ITEM:([^\]]+)\]\]/gi)]
-      .map((match) => {
-        const marker = match[1]?.trim() || '';
+      .map(match => {
+        const marker = match[1]?.trim() || ''
 
         if (!marker) {
-          return null;
+          return null
         }
 
-        const parts = marker.split(':');
+        const parts = marker.split(':')
         if (parts.length >= 2) {
           return {
             itemType: parts[0].trim().toLowerCase(),
             itemId: parts.slice(1).join(':').trim(),
-          };
+          }
         }
 
         return {
           itemType: '',
           itemId: marker,
-        };
+        }
       })
       .filter((reference): reference is { itemType: string; itemId: string } =>
-        Boolean(reference?.itemId),
-      );
+        Boolean(reference?.itemId)
+      )
 
-    return references;
+    return references
   }
 
-  private serializeProposalItem(item: ExchangeProposalWithRelations['requestedItem']) {
+  private serializeProposalItem(
+    item: ExchangeProposalWithRelations['requestedItem']
+  ) {
     return {
       id: item.id,
       ownerUserId: item.ownerUserId,
@@ -611,7 +622,7 @@ export class ExchangeProposalsService {
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       deletedAt: item.deletedAt,
-      images: item.images.map((image) => ({
+      images: item.images.map(image => ({
         id: image.id,
         storageUrl: image.storageUrl,
         storagePath: image.storagePath,
@@ -619,6 +630,6 @@ export class ExchangeProposalsService {
         isCover: image.isCover,
         createdAt: image.createdAt,
       })),
-    };
+    }
   }
 }

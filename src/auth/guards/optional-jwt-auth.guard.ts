@@ -3,13 +3,13 @@ import {
   ExecutionContext,
   Injectable,
   UnauthorizedException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
-import { SecurityLoggerService } from '../../logger/security-logger.service';
-import { IdentitySignalsService } from '../../catalog/identity/identity-signals.service';
-import { RequestWithAuthenticatedUser } from '../interfaces/authenticated-request.interface';
-import { JwtAccessTokenPayload } from '../interfaces/jwt-payload.interface';
+} from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { JwtService } from '@nestjs/jwt'
+import { SecurityLoggerService } from '../../logger/security-logger.service'
+import { IdentitySignalsService } from '../../catalog/identity/identity-signals.service'
+import { RequestWithAuthenticatedUser } from '../interfaces/authenticated-request.interface'
+import { JwtAccessTokenPayload } from '../interfaces/jwt-payload.interface'
 
 @Injectable()
 export class OptionalJwtAuthGuard implements CanActivate {
@@ -17,24 +17,30 @@ export class OptionalJwtAuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly identitySignalsService: IdentitySignalsService,
-    private readonly securityLogger: SecurityLoggerService,
+    private readonly securityLogger: SecurityLoggerService
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request =
-      context.switchToHttp().getRequest<RequestWithAuthenticatedUser>();
-    const token = this.extractBearerToken(request);
+    const request = context
+      .switchToHttp()
+      .getRequest<RequestWithAuthenticatedUser>()
+    const token = this.extractBearerToken(request)
 
     if (!token) {
-      return true;
+      return true
     }
 
-    let payload: JwtAccessTokenPayload;
+    let payload: JwtAccessTokenPayload
 
     try {
-      payload = await this.jwtService.verifyAsync<JwtAccessTokenPayload>(token, {
-        secret: this.configService.getOrThrow<string>('auth.accessTokenSecret'),
-      });
+      payload = await this.jwtService.verifyAsync<JwtAccessTokenPayload>(
+        token,
+        {
+          secret: this.configService.getOrThrow<string>(
+            'auth.accessTokenSecret'
+          ),
+        }
+      )
     } catch (error) {
       this.securityLogger.log('auth.catalog_optional_request', 'failure', {
         ipAddress: request.ip,
@@ -43,8 +49,8 @@ export class OptionalJwtAuthGuard implements CanActivate {
         metadata: {
           error: error instanceof Error ? error.message : 'unknown_error',
         },
-      });
-      throw new UnauthorizedException('Invalid access token');
+      })
+      throw new UnauthorizedException('Invalid access token')
     }
 
     if (
@@ -56,8 +62,8 @@ export class OptionalJwtAuthGuard implements CanActivate {
         ipAddress: request.ip,
         userAgent: request.header('user-agent'),
         reason: 'invalid_access_token_payload',
-      });
-      throw new UnauthorizedException('Invalid access token');
+      })
+      throw new UnauthorizedException('Invalid access token')
     }
 
     request.user = {
@@ -65,15 +71,15 @@ export class OptionalJwtAuthGuard implements CanActivate {
       sessionId: payload.sid,
       email: payload.email,
       tokenType: 'access',
-    };
+    }
 
     try {
       request.catalogActor =
         await this.identitySignalsService.resolveAuthenticatedActor(
           request.user,
           request,
-          token,
-        );
+          token
+        )
     } catch (error) {
       this.securityLogger.log('auth.catalog_optional_request', 'denied', {
         actorUserId: request.user.userId,
@@ -84,28 +90,28 @@ export class OptionalJwtAuthGuard implements CanActivate {
         metadata: {
           error: error instanceof Error ? error.message : 'unknown_error',
         },
-      });
-      throw new UnauthorizedException('Unable to validate authenticated user');
+      })
+      throw new UnauthorizedException('Unable to validate authenticated user')
     }
 
-    return true;
+    return true
   }
 
   private extractBearerToken(
-    request: RequestWithAuthenticatedUser,
+    request: RequestWithAuthenticatedUser
   ): string | null {
-    const authorizationHeader = request.header('authorization');
+    const authorizationHeader = request.header('authorization')
 
     if (!authorizationHeader) {
-      return null;
+      return null
     }
 
-    const [scheme, token] = authorizationHeader.split(' ');
+    const [scheme, token] = authorizationHeader.split(' ')
 
     if (scheme !== 'Bearer' || !token?.trim()) {
-      return null;
+      return null
     }
 
-    return token.trim();
+    return token.trim()
   }
 }

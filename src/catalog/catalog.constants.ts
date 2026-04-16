@@ -35,13 +35,13 @@ export enum ExchangeMatchStatus {
 
 export const ACTIVE_NEGOTIATION_PROPOSAL_STATUSES = [
   ExchangeProposalStatus.PENDING,
-] as const;
+] as const
 
 export const ACTIVE_NEGOTIATION_MATCH_STATUSES = [
   ExchangeMatchStatus.ACTIVE,
-] as const;
+] as const
 
-export const FREE_ACTIVE_NEGOTIATION_LIMIT_PER_ITEM = 3;
+export const FREE_ACTIVE_NEGOTIATION_LIMIT_PER_ITEM = 3
 
-export const FREE_MAX_ACTIVE_OFFERS_PER_PUBLICATION = 5;
-export const FREE_MAX_DISTINCT_REQUESTERS_PER_PUBLICATION = 3;
+export const FREE_MAX_ACTIVE_OFFERS_PER_PUBLICATION = 5
+export const FREE_MAX_DISTINCT_REQUESTERS_PER_PUBLICATION = 3
