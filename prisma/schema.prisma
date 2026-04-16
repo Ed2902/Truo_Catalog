@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CatalogItemCondition {
+  NEW
+  LIKE_NEW
+  USED_GOOD
+  USED_FAIR
+  FOR_PARTS
+}
+
+enum CatalogItemPublicationStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  IN_NEGOTIATION
+  RESERVED
+  EXCHANGED
+  INACTIVE
+  BLOCKED
+}
+
+enum ExchangeProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+model CatalogCategory {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String
+  parentId  String?
+  path      String
+  depth     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   CatalogCategory?  @relation("CatalogCategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children CatalogCategory[] @relation("CatalogCategoryHierarchy")
+  items    CatalogItem[]
+
+  @@unique([parentId, slug])
+  @@index([parentId, isActive])
+  @@index([path])
+}
+
+model CatalogItem {
+  id                    String                       @id @default(uuid())
+  ownerUserId           String
+  title                 String
+  normalizedTitle       String
+  titleTokenSignature   String
+  slug                  String                       @unique
+  description           String
+  normalizedDescription String?
+  categoryId            String
+  condition             CatalogItemCondition
+  subjectiveValue       Int?
+  exchangePreferences   String?
+  publicationStatus     CatalogItemPublicationStatus @default(DRAFT)
+  publishedAt           DateTime?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  deletedAt             DateTime?
+
+  category          CatalogCategory       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  images            CatalogItemImage[]
+  requestedProposals ExchangeProposal[]   @relation("RequestedItemProposals")
+  offeredProposals   ExchangeProposal[]   @relation("OfferedItemProposals")
+
+  @@index([ownerUserId, publicationStatus, deletedAt])
+  @@index([categoryId, publicationStatus, deletedAt])
+  @@index([normalizedTitle, titleTokenSignature])
+}
+
+model CatalogItemImage {
+  id            String   @id @default(uuid())
+  catalogItemId String
+  storageUrl    String
+  storagePath   String?
+  sortOrder     Int      @default(0)
+  isCover       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@index([catalogItemId, sortOrder])
+}
+
+model ExchangeProposal {
+  id              String                 @id @default(uuid())
+  requesterUserId String
+  targetUserId    String
+  requestedItemId String
+  offeredItemId   String
+  status          ExchangeProposalStatus @default(PENDING)
+  message         String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  requestedItem CatalogItem @relation("RequestedItemProposals", fields: [requestedItemId], references: [id], onDelete: Restrict)
+  offeredItem   CatalogItem @relation("OfferedItemProposals", fields: [offeredItemId], references: [id], onDelete: Restrict)
+
+  @@index([requesterUserId, status])
+  @@index([targetUserId, status])
+  @@index([requestedItemId, status])
+  @@index([offeredItemId, status])
+}
