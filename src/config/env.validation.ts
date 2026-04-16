@@ -20,6 +20,17 @@ export const envValidationSchema = Joi.object({
     .valid('fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent')
     .required(),
   LOG_PRETTY_PRINT: Joi.boolean().required(),
+  STORAGE_S3_ENDPOINT: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .required(),
+  STORAGE_S3_ACCESS_KEY: Joi.string().trim().required(),
+  STORAGE_S3_SECRET_KEY: Joi.string().trim().required(),
+  STORAGE_S3_BUCKET: Joi.string().trim().required(),
+  STORAGE_S3_FORCE_PATH_STYLE: Joi.boolean().required(),
+  STORAGE_S3_PUBLIC_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .required(),
+  STORAGE_MAX_UPLOAD_SIZE: Joi.number().positive().required(),
   DATABASE_URL: Joi.string().trim().required(),
   IDENTITY_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })

@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SensitiveRateLimit } from '../common/decorators/sensitive-rate-limit.decorator';
 import { CatalogCategoriesService } from './catalog-categories.service';
 import { CreateCatalogCategoryDto } from './dto/create-catalog-category.dto';
 
@@ -9,6 +11,8 @@ export class CatalogCategoriesController {
   ) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard)
+  @SensitiveRateLimit()
   createCategory(@Body() createCatalogCategoryDto: CreateCatalogCategoryDto) {
     return this.catalogCategoriesService.createCategory(createCatalogCategoryDto);
   }

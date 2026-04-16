@@ -1,27 +1,27 @@
 import {
-  BadRequestException,
+  UnauthorizedException,
   createParamDecorator,
   ExecutionContext,
 } from '@nestjs/common';
-import { Request } from 'express';
 import { CatalogActor } from '../interfaces/catalog-actor.interface';
+import { RequestWithAuthenticatedUser } from '../../auth/interfaces/authenticated-request.interface';
 
-function parseBooleanHeader(value?: string): boolean {
-  return ['true', '1', 'yes', 'on'].includes((value ?? '').toLowerCase());
+export function resolveCatalogActorFromRequest(
+  request: RequestWithAuthenticatedUser,
+): CatalogActor | null {
+  return request.catalogActor ?? null;
 }
 
 export const CurrentCatalogActor = createParamDecorator(
   (_data: unknown, context: ExecutionContext): CatalogActor => {
-    const request = context.switchToHttp().getRequest<Request>();
-    const userId = request.header('x-user-id')?.trim();
+    const request =
+      context.switchToHttp().getRequest<RequestWithAuthenticatedUser>();
+    const actor = resolveCatalogActorFromRequest(request);
 
-    if (!userId) {
-      throw new BadRequestException('Missing x-user-id header');
+    if (!actor) {
+      throw new UnauthorizedException('Missing authenticated actor');
     }
 
-    return {
-      userId,
-      isPremium: parseBooleanHeader(request.header('x-user-premium')),
-    };
+    return actor;
   },
 );

@@ -39,6 +39,7 @@ type RequestWithContext = IncomingMessage & {
             redact: {
               paths: [
                 'req.headers.authorization',
+                'req.headers.x-internal-token',
                 'req.headers.cookie',
                 'res.headers["set-cookie"]',
               ],

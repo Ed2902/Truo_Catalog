@@ -47,6 +47,15 @@ export default () => ({
     level: process.env.LOG_LEVEL as string,
     prettyPrint: parseBoolean(process.env.LOG_PRETTY_PRINT as string),
   },
+  storage: {
+    endpoint: process.env.STORAGE_S3_ENDPOINT as string,
+    accessKey: process.env.STORAGE_S3_ACCESS_KEY as string,
+    secretKey: process.env.STORAGE_S3_SECRET_KEY as string,
+    bucket: process.env.STORAGE_S3_BUCKET as string,
+    forcePathStyle: parseBoolean(process.env.STORAGE_S3_FORCE_PATH_STYLE as string),
+    publicBaseUrl: process.env.STORAGE_S3_PUBLIC_BASE_URL as string,
+    maxUploadSize: parseNumber(process.env.STORAGE_MAX_UPLOAD_SIZE as string),
+  },
   database: {
     url: process.env.DATABASE_URL as string,
   },

@@ -34,6 +34,14 @@ enum ExchangeProposalStatus {
   EXPIRED
 }
 
+enum ExchangeMatchStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  NOT_CONCRETED
+  EXPIRED
+}
+
 model CatalogCategory {
   id        String   @id @default(uuid())
   name      String
@@ -77,6 +85,8 @@ model CatalogItem {
   images            CatalogItemImage[]
   requestedProposals ExchangeProposal[]   @relation("RequestedItemProposals")
   offeredProposals   ExchangeProposal[]   @relation("OfferedItemProposals")
+  requestedMatches   ExchangeMatch[]      @relation("RequestedItemMatches")
+  offeredMatches     ExchangeMatch[]      @relation("OfferedItemMatches")
 
   @@index([ownerUserId, publicationStatus, deletedAt])
   @@index([categoryId, publicationStatus, deletedAt])
@@ -103,6 +113,7 @@ model ExchangeProposal {
   targetUserId    String
   requestedItemId String
   offeredItemId   String
+  isPublic        Boolean                @default(true)
   status          ExchangeProposalStatus @default(PENDING)
   message         String?
   createdAt       DateTime               @default(now())
@@ -110,6 +121,33 @@ model ExchangeProposal {
 
   requestedItem CatalogItem @relation("RequestedItemProposals", fields: [requestedItemId], references: [id], onDelete: Restrict)
   offeredItem   CatalogItem @relation("OfferedItemProposals", fields: [offeredItemId], references: [id], onDelete: Restrict)
+  match         ExchangeMatch?
+
+  @@index([requesterUserId, status])
+  @@index([targetUserId, status])
+  @@index([requestedItemId, status])
+  @@index([offeredItemId, status])
+}
+
+model ExchangeMatch {
+  id             String              @id @default(uuid())
+  proposalId     String              @unique
+  requesterUserId String
+  targetUserId   String
+  requestedItemId String
+  offeredItemId  String
+  status         ExchangeMatchStatus @default(ACTIVE)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  completedAt    DateTime?
+  closedAt       DateTime?
+  closedByUserId String?
+  closeReason    String?
+  expiresAt      DateTime?
+
+  proposal      ExchangeProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  requestedItem CatalogItem      @relation("RequestedItemMatches", fields: [requestedItemId], references: [id], onDelete: Restrict)
+  offeredItem   CatalogItem      @relation("OfferedItemMatches", fields: [offeredItemId], references: [id], onDelete: Restrict)
 
   @@index([requesterUserId, status])
   @@index([targetUserId, status])

@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateExchangeProposalDto {
   @IsString()
@@ -11,4 +11,8 @@ export class CreateExchangeProposalDto {
   @IsString()
   @MaxLength(500)
   message?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isPublic?: boolean;
 }

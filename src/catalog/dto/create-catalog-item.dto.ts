@@ -50,7 +50,7 @@ export class CreateCatalogItemDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(10)
+  @ArrayMaxSize(5)
   @ValidateNested({ each: true })
   @Type(() => CatalogItemImageInputDto)
   images?: CatalogItemImageInputDto[];
