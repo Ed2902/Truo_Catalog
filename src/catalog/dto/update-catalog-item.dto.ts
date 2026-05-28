@@ -13,7 +13,7 @@ import {
 import {
   CatalogItemCondition,
   CatalogItemPublicationStatus,
-} from '../catalog.constants';
+} from '../shared/catalog.constants';
 import { Type } from 'class-transformer';
 import { CatalogItemImageInputDto } from './catalog-item-image-input.dto';
 

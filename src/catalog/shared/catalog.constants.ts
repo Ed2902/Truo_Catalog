@@ -1,0 +1,110 @@
+export enum CatalogItemCondition {
+  NEW = 'NEW',
+  LIKE_NEW = 'LIKE_NEW',
+  USED_GOOD = 'USED_GOOD',
+  USED_FAIR = 'USED_FAIR',
+  FOR_PARTS = 'FOR_PARTS',
+}
+
+export enum CatalogItemPublicationStatus {
+  DRAFT = 'DRAFT',
+  ACTIVE = 'ACTIVE',
+  PAUSED = 'PAUSED',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  IN_NEGOTIATION = 'IN_NEGOTIATION',
+  RESERVED = 'RESERVED',
+  EXCHANGED = 'EXCHANGED',
+  INACTIVE = 'INACTIVE',
+  BLOCKED = 'BLOCKED',
+}
+
+export enum CatalogImageModerationStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  NEEDS_REVIEW = 'NEEDS_REVIEW',
+  BLOCKED = 'BLOCKED',
+  ERROR = 'ERROR',
+}
+
+export enum CatalogImageModerationRecommendedAction {
+  APPROVE = 'APPROVE',
+  KEEP_VISIBLE = 'KEEP_VISIBLE',
+  SEND_TO_REVIEW = 'SEND_TO_REVIEW',
+  REMOVE_PRODUCT = 'REMOVE_PRODUCT',
+}
+
+export enum CatalogModerationAppealStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum CatalogItemReportReason {
+  PROHIBITED_CONTENT = 'PROHIBITED_CONTENT',
+  EXTERNAL_CONTACT = 'EXTERNAL_CONTACT',
+  MISLEADING_PRODUCT = 'MISLEADING_PRODUCT',
+  SCAM_OR_FRAUD = 'SCAM_OR_FRAUD',
+  DUPLICATE = 'DUPLICATE',
+  OTHER = 'OTHER',
+}
+
+export enum CatalogItemReportStatus {
+  PENDING = 'PENDING',
+  DISMISSED = 'DISMISSED',
+  SENT_TO_REVIEW = 'SENT_TO_REVIEW',
+  ACTIONED = 'ACTIONED',
+}
+
+export enum ExchangeProposalStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum ExchangeMatchStatus {
+  ACTIVE = 'ACTIVE',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  NOT_CONCRETED = 'NOT_CONCRETED',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum ExchangeDisputeStatus {
+  OPEN = 'OPEN',
+  IN_REVIEW = 'IN_REVIEW',
+  RESOLVED = 'RESOLVED',
+  CLOSED = 'CLOSED',
+}
+
+export enum ExchangeDisputeReason {
+  ITEM_NOT_AS_DESCRIBED = 'ITEM_NOT_AS_DESCRIBED',
+  NO_SHOW = 'NO_SHOW',
+  SAFETY_CONCERN = 'SAFETY_CONCERN',
+  DELIVERY_OR_HANDOFF = 'DELIVERY_OR_HANDOFF',
+  HARASSMENT = 'HARASSMENT',
+  OTHER = 'OTHER',
+}
+
+export enum ExchangeDisputeMessageSenderType {
+  USER = 'USER',
+  ADMIN = 'ADMIN',
+  SYSTEM = 'SYSTEM',
+}
+
+export const ACTIVE_NEGOTIATION_PROPOSAL_STATUSES = [
+  ExchangeProposalStatus.PENDING,
+] as const
+
+export const ACTIVE_NEGOTIATION_MATCH_STATUSES = [
+  ExchangeMatchStatus.ACTIVE,
+] as const
+
+export const FREE_ACTIVE_NEGOTIATION_LIMIT_PER_ITEM = 3
+
+export const FREE_MAX_ACTIVE_OFFERS_PER_PUBLICATION = 5
+export const FREE_MAX_DISTINCT_REQUESTERS_PER_PUBLICATION = 3
+export const FREE_MAX_ACTIVE_OUTGOING_OFFERS = 5
+export const FREE_MAX_DISTINCT_TARGET_USERS_PER_REQUESTER = 5

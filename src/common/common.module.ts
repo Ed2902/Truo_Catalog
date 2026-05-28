@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { GlobalExceptionFilter } from './filters/global-exception.filter';
+import { NotificationsApiService } from './notifications-api.service';
 import { ThrottlerBehindProxyGuard } from './guards/throttler-behind-proxy.guard';
 import { ResponseTimeInterceptor } from './interceptors/response-time.interceptor';
 
@@ -30,11 +31,17 @@ import { ResponseTimeInterceptor } from './interceptors/response-time.intercepto
   providers: [
     GlobalExceptionFilter,
     ResponseTimeInterceptor,
+    NotificationsApiService,
     {
       provide: APP_GUARD,
       useClass: ThrottlerBehindProxyGuard,
     },
   ],
-  exports: [GlobalExceptionFilter, ResponseTimeInterceptor, ThrottlerModule],
+  exports: [
+    GlobalExceptionFilter,
+    ResponseTimeInterceptor,
+    ThrottlerModule,
+    NotificationsApiService,
+  ],
 })
 export class CommonModule {}

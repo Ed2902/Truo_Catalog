@@ -1,4 +1,4 @@
-import { IsInt, IsString, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateCatalogItemImageUploadUrlDto {
   @IsString()
@@ -10,4 +10,8 @@ export class CreateCatalogItemImageUploadUrlDto {
   @IsInt()
   @Min(1)
   size!: number;
+
+  @IsOptional()
+  @IsBoolean()
+  replaceExistingImages?: boolean;
 }

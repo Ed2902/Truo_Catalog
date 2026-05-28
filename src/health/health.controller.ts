@@ -18,7 +18,7 @@ export class HealthController {
   @SkipThrottle({
     default: true,
   })
-  getReadiness() {
+  async getReadiness() {
     return this.healthService.getReadiness();
   }
 }

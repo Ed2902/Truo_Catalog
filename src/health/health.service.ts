@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { formatDateForTimeZone, isValidIanaTimeZone } from '../common/utils/time-zone.util';
+import { QueueService } from '../queue/queue.service';
 
 @Injectable()
 export class HealthService {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly queueService: QueueService,
+  ) {}
 
   getLiveness() {
     return {
@@ -13,9 +17,10 @@ export class HealthService {
     };
   }
 
-  getReadiness() {
+  async getReadiness() {
     const now = new Date();
     const timeZone = this.configService.getOrThrow<string>('app.timeZone');
+    const queue = await this.queueService.ping();
 
     return {
       status: 'ok',
@@ -27,6 +32,7 @@ export class HealthService {
       localTime: isValidIanaTimeZone(timeZone)
         ? formatDateForTimeZone(now, timeZone)
         : now.toISOString(),
+      queue,
     };
   }
 }

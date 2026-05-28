@@ -1,0 +1,64 @@
+
+> catalog-api@0.0.1 start:prod
+> node dist/main
+
+[2026-04-30 14:46:16.591 -0500] [32mINFO[39m: [36mStarting Nest application...[39m [90m{"context":"NestFactory"}[39m
+[2026-04-30 14:46:16.592 -0500] [32mINFO[39m: [36mAppModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.592 -0500] [32mINFO[39m: [36mAppConfigModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.592 -0500] [32mINFO[39m: [36mPrismaModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mConfigHostModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mConfigModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mConfigModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mStorageModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mThrottlerModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mJwtModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mHealthModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mLoggerModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mAppLoggerModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mCommonModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mAuthModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mCatalogModule dependencies initialized[39m [90m{"context":"InstanceLoader"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mHealthController {/api/health}:[39m [90m{"context":"RoutesResolver"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/health/live, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/health/ready, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mCatalogCategoriesController {/api/catalog/categories}:[39m [90m{"context":"RoutesResolver"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/categories, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/categories, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mCatalogItemImagesController {/api/catalog/items/:itemId/images}:[39m [90m{"context":"RoutesResolver"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/:itemId/images/upload-url, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/:itemId/images/confirm, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mCatalogModerationController {/api/catalog/moderation}:[39m [90m{"context":"RoutesResolver"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/items/:itemId/reports, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/items/:itemId/appeals, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/items/:itemId/appeals, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/internal/reviews, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/internal/blocked, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/internal/reports, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/internal/reports/:reportId/resolve, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/internal/reviews/:moderationId/resolve, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/internal/appeals, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/moderation/internal/appeals/:appealId/resolve, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mCatalogItemsController {/api/catalog/items}:[39m [90m{"context":"RoutesResolver"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/:itemId, PATCH} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/:itemId, DELETE} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/:itemId/restore, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/me/trash, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/me, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/items/:itemId, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mExchangeProposalsController {/api/catalog/exchange-proposals}:[39m [90m{"context":"RoutesResolver"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-proposals, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-proposals/me, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-proposals/public/requested-item/:itemId, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.593 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-proposals/:proposalId/accept, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-proposals/:proposalId/reject, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-proposals/:proposalId/cancel, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-proposals/:proposalId/respond-message, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mExchangeMatchesController {/api/catalog/exchange-matches}:[39m [90m{"context":"RoutesResolver"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-matches/me, GET} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-matches/:matchId/complete, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-matches/:matchId/not-concreted, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-matches/:matchId/cancel, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mMapped {/api/catalog/exchange-matches/:matchId/expire, POST} route[39m [90m{"context":"RouterExplorer"}[39m
+[2026-04-30 14:46:16.594 -0500] [32mINFO[39m: [36mNest application successfully started[39m [90m{"context":"NestApplication"}[39m

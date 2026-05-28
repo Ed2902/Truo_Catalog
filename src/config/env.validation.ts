@@ -8,6 +8,8 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().port().required(),
   API_PREFIX: Joi.string().trim().required(),
   TRUST_PROXY: Joi.boolean().required(),
+  TRUST_PROXY_HOPS: Joi.number().integer().min(1).max(10).optional(),
+  TRUST_PROXY_CIDRS: Joi.string().trim().allow('').optional(),
   APP_TIME_ZONE: Joi.string().trim().required(),
   CORS_ORIGINS: Joi.string()
     .allow('')
@@ -32,6 +34,8 @@ export const envValidationSchema = Joi.object({
     .required(),
   STORAGE_MAX_UPLOAD_SIZE: Joi.number().positive().required(),
   DATABASE_URL: Joi.string().trim().required(),
+  REDIS_URL: Joi.string().trim().required(),
+  QUEUE_PREFIX: Joi.string().trim().required(),
   IDENTITY_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .allow('')
@@ -40,6 +44,35 @@ export const envValidationSchema = Joi.object({
     .allow('')
     .optional(),
   IDENTITY_SIGNALS_TIMEOUT_MS: Joi.number().positive().optional(),
+  IMAGE_ANALYZER_WORKER_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .allow('')
+    .optional(),
+  IMAGE_ANALYZER_TIMEOUT_MS: Joi.number().positive().optional(),
+  TEXT_ANALYZER_WORKER_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .allow('')
+    .optional(),
+  TEXT_ANALYZER_TIMEOUT_MS: Joi.number().positive().optional(),
+  CHAT_API_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .allow('')
+    .optional(),
+  CHAT_API_INTERNAL_TOKEN: Joi.string()
+    .allow('')
+    .optional(),
+  CHAT_API_TIMEOUT_MS: Joi.number().positive().optional(),
+  NOTIFICATIONS_API_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .allow('')
+    .optional(),
+  NOTIFICATIONS_INTERNAL_TOKEN: Joi.string()
+    .allow('')
+    .optional(),
+  NOTIFICATIONS_API_TIMEOUT_MS: Joi.number().positive().optional(),
+  MODERATION_INTERNAL_TOKEN: Joi.string()
+    .allow('')
+    .optional(),
   AUTH_ACCESS_TOKEN_SECRET: Joi.string().min(16).required(),
   AUTH_ACCESS_TOKEN_TTL: Joi.string().trim().required(),
   AUTH_REFRESH_TOKEN_SECRET: Joi.string().min(16).required(),

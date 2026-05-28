@@ -1,37 +1,64 @@
 import { Module } from '@nestjs/common'
 import { AuthModule } from '../auth/auth.module'
+import { CommonModule } from '../common/common.module'
+import { QueueModule } from '../queue/queue.module'
 import { StorageModule } from '../storage/storage.module'
-import { CatalogItemImagesController } from './catalog-item-images.controller'
-import { CatalogItemImagesService } from './catalog-item-images.service'
-import { CatalogCategoriesController } from './catalog-categories.controller'
-import { CatalogCategoriesService } from './catalog-categories.service'
-import { CatalogDuplicatePolicyService } from './catalog-duplicate-policy.service'
-import { CatalogItemsController } from './catalog-items.controller'
-import { CatalogItemsService } from './catalog-items.service'
-import { CatalogNegotiationPolicyService } from './catalog-negotiation-policy.service'
-import { ExchangeProposalsController } from './exchange-proposals.controller'
-import { ExchangeProposalsService } from './exchange-proposals.service'
-import { ExchangeMatchesController } from './exchange-matches.controller'
-import { ExchangeMatchesService } from './exchange-matches.service'
+import { CatalogAdminController } from './admin/catalog-admin.controller'
+import { CatalogAdminExchangesService } from './admin/catalog-admin-exchanges.service'
+import { CatalogAdminMetricsService } from './admin/catalog-admin-metrics.service'
+import { CatalogAdminQueueService } from './admin/catalog-admin-queue.service'
+import { CatalogCategoriesController } from './categories/catalog-categories.controller'
+import { CatalogCategoriesService } from './categories/catalog-categories.service'
+import { CatalogNegotiationPolicyService } from './exchanges/catalog-negotiation-policy.service'
+import { ChatApiService } from './exchanges/chat-api.service'
+import { ExchangeDisputesController } from './exchanges/exchange-disputes.controller'
+import { ExchangeDisputesService } from './exchanges/exchange-disputes.service'
+import { ExchangeMatchesController } from './exchanges/exchange-matches.controller'
+import { ExchangeMatchesService } from './exchanges/exchange-matches.service'
+import { ExchangeProposalsController } from './exchanges/exchange-proposals.controller'
+import { ExchangeProposalsService } from './exchanges/exchange-proposals.service'
 import { IdentitySignalsService } from './identity/identity-signals.service'
+import { CatalogDuplicatePolicyService } from './items/catalog-duplicate-policy.service'
+import { CatalogItemImagesController } from './items/catalog-item-images.controller'
+import { CatalogItemImagesService } from './items/catalog-item-images.service'
+import { CatalogItemsController } from './items/catalog-items.controller'
+import { CatalogItemsService } from './items/catalog-items.service'
+import { CatalogImageModerationService } from './moderation/catalog-image-moderation.service'
+import { CatalogModerationController } from './moderation/catalog-moderation.controller'
+import { CatalogPublicationModerationProcessor } from './moderation/catalog-publication-moderation.processor'
+import { CatalogPublicationModerationService } from './moderation/catalog-publication-moderation.service'
+import { CatalogTextModerationService } from './moderation/catalog-text-moderation.service'
 
 @Module({
-  imports: [AuthModule, StorageModule],
+  imports: [AuthModule, CommonModule, StorageModule, QueueModule],
   controllers: [
+    CatalogAdminController,
     CatalogCategoriesController,
     CatalogItemImagesController,
+    CatalogModerationController,
     CatalogItemsController,
+    ExchangeDisputesController,
     ExchangeProposalsController,
     ExchangeMatchesController,
   ],
   providers: [
     CatalogCategoriesService,
+    CatalogImageModerationService,
+    CatalogTextModerationService,
+    CatalogPublicationModerationService,
+    CatalogPublicationModerationProcessor,
+    CatalogAdminExchangesService,
+    CatalogAdminQueueService,
+    CatalogAdminMetricsService,
     CatalogItemImagesService,
     CatalogDuplicatePolicyService,
     CatalogItemsService,
     CatalogNegotiationPolicyService,
+    ChatApiService,
+    ExchangeDisputesService,
     ExchangeProposalsService,
     ExchangeMatchesService,
+    IdentitySignalsService,
   ],
 })
 export class CatalogModule {}

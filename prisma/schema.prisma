@@ -19,11 +19,57 @@ enum CatalogItemPublicationStatus {
   DRAFT
   ACTIVE
   PAUSED
+  UNDER_REVIEW
   IN_NEGOTIATION
   RESERVED
   EXCHANGED
   INACTIVE
   BLOCKED
+}
+
+enum CatalogImageModerationStatus {
+  PENDING
+  APPROVED
+  NEEDS_REVIEW
+  BLOCKED
+  ERROR
+}
+
+enum CatalogImageModerationRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum CatalogImageModerationRecommendedAction {
+  APPROVE
+  KEEP_VISIBLE
+  SEND_TO_REVIEW
+  REMOVE_PRODUCT
+}
+
+enum CatalogModerationAppealStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum CatalogItemReportReason {
+  PROHIBITED_CONTENT
+  EXTERNAL_CONTACT
+  MISLEADING_PRODUCT
+  SCAM_OR_FRAUD
+  DUPLICATE
+  OTHER
+}
+
+enum CatalogItemReportStatus {
+  PENDING
+  DISMISSED
+  SENT_TO_REVIEW
+  ACTIONED
 }
 
 enum ExchangeProposalStatus {
@@ -40,6 +86,33 @@ enum ExchangeMatchStatus {
   CANCELLED
   NOT_CONCRETED
   EXPIRED
+}
+
+enum ExchangeProposalAdUnlockType {
+  INCOMING_PROPOSAL_VIEW
+  OUTGOING_PROPOSAL_CREATE
+}
+
+enum ExchangeDisputeStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum ExchangeDisputeReason {
+  ITEM_NOT_AS_DESCRIBED
+  NO_SHOW
+  SAFETY_CONCERN
+  DELIVERY_OR_HANDOFF
+  HARASSMENT
+  OTHER
+}
+
+enum ExchangeDisputeMessageSenderType {
+  USER
+  ADMIN
+  SYSTEM
 }
 
 model CatalogCategory {
@@ -76,17 +149,24 @@ model CatalogItem {
   subjectiveValue       Int?
   exchangePreferences   String?
   publicationStatus     CatalogItemPublicationStatus @default(DRAFT)
+  ownerModerationReport Json?
   publishedAt           DateTime?
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt
   deletedAt             DateTime?
+  trashExpiresAt        DateTime?
 
   category          CatalogCategory       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   images            CatalogItemImage[]
+  imageModerations  CatalogItemImageModeration[]
+  moderationAppeals CatalogModerationAppeal[]
+  reports           CatalogItemReport[]
   requestedProposals ExchangeProposal[]   @relation("RequestedItemProposals")
   offeredProposals   ExchangeProposal[]   @relation("OfferedItemProposals")
   requestedMatches   ExchangeMatch[]      @relation("RequestedItemMatches")
   offeredMatches     ExchangeMatch[]      @relation("OfferedItemMatches")
+  requestedDisputes  ExchangeDispute[]    @relation("RequestedItemDisputes")
+  offeredDisputes    ExchangeDispute[]    @relation("OfferedItemDisputes")
 
   @@index([ownerUserId, publicationStatus, deletedAt])
   @@index([categoryId, publicationStatus, deletedAt])
@@ -103,8 +183,80 @@ model CatalogItemImage {
   createdAt     DateTime @default(now())
 
   catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  moderations CatalogItemImageModeration[]
 
   @@index([catalogItemId, sortOrder])
+}
+
+model CatalogItemImageModeration {
+  id                  String                                  @id @default(uuid())
+  catalogItemId       String
+  catalogItemImageId  String?
+  jobId               String                                  @unique
+  status              CatalogImageModerationStatus             @default(PENDING)
+  detectedProductType String?
+  isProhibited        Boolean?
+  riskLevel           CatalogImageModerationRiskLevel?
+  confidence          Float?
+  flags               String[]                                @default([])
+  recommendedAction   CatalogImageModerationRecommendedAction?
+  rawResult           Json?
+  errorMessage        String?
+  analyzedAt          DateTime?
+  reviewedAt          DateTime?
+  reviewedByUserId    String?
+  reviewNotes         String?
+  createdAt           DateTime                                @default(now())
+  updatedAt           DateTime                                @updatedAt
+
+  catalogItem      CatalogItem       @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  catalogItemImage CatalogItemImage? @relation(fields: [catalogItemImageId], references: [id], onDelete: SetNull)
+  appeals          CatalogModerationAppeal[]
+
+  @@index([catalogItemId, status])
+  @@index([catalogItemImageId])
+  @@index([status, createdAt])
+}
+
+model CatalogModerationAppeal {
+  id                String                         @id @default(uuid())
+  catalogItemId     String
+  moderationId      String?
+  ownerUserId       String
+  status            CatalogModerationAppealStatus  @default(PENDING)
+  message           String
+  resolutionMessage String?
+  resolvedByUserId  String?
+  resolvedAt        DateTime?
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+
+  catalogItem CatalogItem                  @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  moderation  CatalogItemImageModeration?  @relation(fields: [moderationId], references: [id], onDelete: SetNull)
+
+  @@index([catalogItemId, status])
+  @@index([ownerUserId, status])
+  @@index([status, createdAt])
+}
+
+model CatalogItemReport {
+  id               String                  @id @default(uuid())
+  catalogItemId    String
+  reporterUserId   String
+  reason           CatalogItemReportReason
+  details          String?
+  status           CatalogItemReportStatus @default(PENDING)
+  resolutionNotes  String?
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@index([catalogItemId, status])
+  @@index([reporterUserId, status])
+  @@index([status, createdAt])
 }
 
 model ExchangeProposal {
@@ -129,6 +281,22 @@ model ExchangeProposal {
   @@index([offeredItemId, status])
 }
 
+model ExchangeProposalAdUnlock {
+  id                  String                     @id @default(uuid())
+  userId              String
+  unlockType          ExchangeProposalAdUnlockType
+  requestedItemId     String?
+  proposalId          String?
+  consumedByProposalId String?
+  consumedAt          DateTime?
+  createdAt           DateTime                   @default(now())
+
+  @@unique([userId, unlockType, proposalId])
+  @@index([userId, unlockType, createdAt])
+  @@index([userId, requestedItemId, unlockType])
+  @@index([userId, unlockType, consumedAt])
+}
+
 model ExchangeMatch {
   id             String              @id @default(uuid())
   proposalId     String              @unique
@@ -148,9 +316,112 @@ model ExchangeMatch {
   proposal      ExchangeProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
   requestedItem CatalogItem      @relation("RequestedItemMatches", fields: [requestedItemId], references: [id], onDelete: Restrict)
   offeredItem   CatalogItem      @relation("OfferedItemMatches", fields: [offeredItemId], references: [id], onDelete: Restrict)
+  disputes      ExchangeDispute[]
+  feedbacks     ExchangeMatchFeedback[]
+  feedbackReminders ExchangeMatchFeedbackReminder[]
+  completionConfirmations ExchangeMatchParticipantConfirmation[]
 
   @@index([requesterUserId, status])
   @@index([targetUserId, status])
   @@index([requestedItemId, status])
   @@index([offeredItemId, status])
+}
+
+model ExchangeMatchParticipantConfirmation {
+  id          String   @id @default(uuid())
+  matchId     String
+  userId      String
+  confirmedAt DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  match ExchangeMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, userId])
+  @@index([userId, confirmedAt])
+  @@index([matchId, confirmedAt])
+}
+
+model ExchangeMatchFeedback {
+  id                    String   @id @default(uuid())
+  matchId               String
+  reviewerUserId        String
+  reviewedUserId        String
+  wasEffectiveInPerson  Boolean
+  rating                Int
+  comment               String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  match ExchangeMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, reviewerUserId])
+  @@index([reviewedUserId, rating])
+  @@index([wasEffectiveInPerson, createdAt])
+}
+
+model ExchangeMatchFeedbackReminder {
+  id            String   @id @default(uuid())
+  matchId       String
+  userId        String
+  reminderCount Int      @default(0)
+  lastSentAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  match ExchangeMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, userId])
+  @@index([userId, lastSentAt])
+  @@index([lastSentAt])
+}
+
+model ExchangeDispute {
+  id                    String                @id @default(uuid())
+  matchId               String
+  proposalId            String?
+  openedByUserId        String
+  requesterUserId       String
+  targetUserId          String
+  requestedItemId       String
+  offeredItemId         String
+  status                ExchangeDisputeStatus @default(OPEN)
+  reason                ExchangeDisputeReason
+  title                 String
+  description           String
+  resolution            String?
+  assignedAdminUserId   String?
+  resolvedByAdminUserId String?
+  resolvedAt            DateTime?
+  closedAt              DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  match         ExchangeMatch             @relation(fields: [matchId], references: [id], onDelete: Restrict)
+  requestedItem CatalogItem                @relation("RequestedItemDisputes", fields: [requestedItemId], references: [id], onDelete: Restrict)
+  offeredItem   CatalogItem                @relation("OfferedItemDisputes", fields: [offeredItemId], references: [id], onDelete: Restrict)
+  messages      ExchangeDisputeMessage[]
+
+  @@index([matchId, status])
+  @@index([requesterUserId, status])
+  @@index([targetUserId, status])
+  @@index([openedByUserId, status])
+  @@index([status, updatedAt])
+}
+
+model ExchangeDisputeMessage {
+  id                String                           @id @default(uuid())
+  disputeId         String
+  senderType        ExchangeDisputeMessageSenderType
+  senderUserId      String?
+  senderAdminUserId String?
+  text              String
+  isInternalNote    Boolean                          @default(false)
+  createdAt         DateTime                         @default(now())
+
+  dispute ExchangeDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId, createdAt])
+  @@index([senderUserId, createdAt])
+  @@index([senderAdminUserId, createdAt])
 }

@@ -9,8 +9,9 @@ import {
 } from 'class-validator';
 
 export class CatalogItemImageInputDto {
+  @IsOptional()
   @IsUrl()
-  storageUrl!: string;
+  storageUrl?: string;
 
   @IsOptional()
   @IsString()

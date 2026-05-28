@@ -11,6 +11,7 @@ import { AppConfigModule } from './config/app-config.module';
 import { HealthModule } from './health/health.module';
 import { AppLoggerModule } from './logger/logger.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { QueueModule } from './queue/queue.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AppLoggerModule,
     CommonModule,
     PrismaModule,
+    QueueModule,
     HealthModule,
     CatalogModule,
   ],

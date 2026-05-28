@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   HeadObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
   S3ServiceException,
@@ -89,6 +90,17 @@ export class StorageService {
   createCatalogItemImagePublicUrl(storageKey: string) {
     const normalizedBaseUrl = this.publicBaseUrl.replace(/\/+$/, '');
     return `${normalizedBaseUrl}/${this.bucket}/${storageKey}`;
+  }
+
+  async createCatalogItemImageReadUrl(storageKey: string) {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: storageKey,
+    });
+
+    return getSignedUrl(this.client, command, {
+      expiresIn: 3600,
+    });
   }
 
   assertCatalogItemImageOwnership(

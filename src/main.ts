@@ -8,9 +8,32 @@ import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ResponseTimeInterceptor } from './common/interceptors/response-time.interceptor';
 
+function registerProcessErrorHandlers(context: string) {
+  const processWithFlag = process as NodeJS.Process & {
+    __truoProcessHandlersRegistered?: boolean;
+  };
+
+  if (processWithFlag.__truoProcessHandlersRegistered) {
+    return;
+  }
+
+  processWithFlag.__truoProcessHandlersRegistered = true;
+
+  process.on('unhandledRejection', (reason) => {
+    console.error(`[${context}] Unhandled promise rejection`, reason);
+  });
+
+  process.on('uncaughtException', (error) => {
+    console.error(`[${context}] Uncaught exception`, error);
+  });
+}
+
 async function bootstrap() {
+  registerProcessErrorHandlers('catalog-api');
+
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
+    abortOnError: false,
   });
   const configService = app.get(ConfigService);
 
@@ -33,10 +56,15 @@ async function bootstrap() {
   app
     .getHttpAdapter()
     .getInstance()
-    .set('trust proxy', configService.getOrThrow<boolean>('app.trustProxy'));
+    .set(
+      'trust proxy',
+      configService.getOrThrow<boolean | number | string>('app.trustProxy'),
+    );
 
   app.enableCors({
-    origin: configService.getOrThrow<string[] | boolean>('cors.origin'),
+    origin: configService.getOrThrow<Array<string | RegExp> | boolean>(
+      'cors.origin',
+    ),
     credentials: configService.getOrThrow<boolean>('cors.credentials'),
     methods: configService.getOrThrow<string[]>('cors.methods'),
     allowedHeaders: configService.getOrThrow<string[]>('cors.allowedHeaders'),
@@ -46,4 +74,6 @@ async function bootstrap() {
   await app.listen(configService.getOrThrow<number>('app.port'));
 }
 
-void bootstrap();
+void bootstrap().catch((error) => {
+  console.error('[catalog-api] Bootstrap failed', error);
+});

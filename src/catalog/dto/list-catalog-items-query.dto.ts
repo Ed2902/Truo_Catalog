@@ -7,7 +7,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CatalogItemPublicationStatus } from '../catalog.constants';
+import { CatalogItemPublicationStatus } from '../shared/catalog.constants';
 
 export class ListCatalogItemsQueryDto {
   @IsOptional()
