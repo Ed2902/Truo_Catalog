@@ -1,0 +1,33 @@
+export enum CatalogItemCondition {
+  NEW = 'NEW',
+  LIKE_NEW = 'LIKE_NEW',
+  USED_GOOD = 'USED_GOOD',
+  USED_FAIR = 'USED_FAIR',
+  FOR_PARTS = 'FOR_PARTS',
+}
+
+export enum CatalogItemPublicationStatus {
+  DRAFT = 'DRAFT',
+  ACTIVE = 'ACTIVE',
+  PAUSED = 'PAUSED',
+  IN_NEGOTIATION = 'IN_NEGOTIATION',
+  RESERVED = 'RESERVED',
+  EXCHANGED = 'EXCHANGED',
+  INACTIVE = 'INACTIVE',
+  BLOCKED = 'BLOCKED',
+}
+
+export enum ExchangeProposalStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
+}
+
+export const ACTIVE_NEGOTIATION_PROPOSAL_STATUSES = [
+  ExchangeProposalStatus.PENDING,
+  ExchangeProposalStatus.ACCEPTED,
+] as const;
+
+export const FREE_ACTIVE_NEGOTIATION_LIMIT_PER_ITEM = 3;
