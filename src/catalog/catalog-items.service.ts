@@ -3,40 +3,34 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import {
-  CatalogCategory,
-  CatalogItemImage,
-  Prisma,
-} from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { sanitizePlainText } from '../common/utils/sanitize-text.util';
-import {
-  CatalogItemPublicationStatus,
-} from './catalog.constants';
-import { CatalogCategoriesService } from './catalog-categories.service';
-import { CatalogDuplicatePolicyService } from './catalog-duplicate-policy.service';
-import { CatalogNegotiationPolicyService } from './catalog-negotiation-policy.service';
-import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
-import { ListCatalogItemsQueryDto } from './dto/list-catalog-items-query.dto';
-import { UpdateCatalogItemDto } from './dto/update-catalog-item.dto';
-import { CatalogActor } from './interfaces/catalog-actor.interface';
+} from '@nestjs/common'
+import { CatalogCategory, CatalogItemImage, Prisma } from '@prisma/client'
+import { PrismaService } from '../prisma/prisma.service'
+import { sanitizePlainText } from '../common/utils/sanitize-text.util'
+import { CatalogItemPublicationStatus } from './catalog.constants'
+import { CatalogCategoriesService } from './catalog-categories.service'
+import { CatalogDuplicatePolicyService } from './catalog-duplicate-policy.service'
+import { CatalogNegotiationPolicyService } from './catalog-negotiation-policy.service'
+import { CreateCatalogItemDto } from './dto/create-catalog-item.dto'
+import { ListCatalogItemsQueryDto } from './dto/list-catalog-items-query.dto'
+import { UpdateCatalogItemDto } from './dto/update-catalog-item.dto'
+import { CatalogActor } from './interfaces/catalog-actor.interface'
 import {
   buildTitleTokenSignature,
   normalizeCatalogText,
   slugifyCatalogTitle,
-} from './utils/catalog-normalization.util';
+} from './utils/catalog-normalization.util'
 
 const itemDetailInclude = {
   category: true,
   images: {
     orderBy: [{ isCover: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
   },
-} satisfies Prisma.CatalogItemInclude;
+} satisfies Prisma.CatalogItemInclude
 
 type CatalogItemWithRelations = Prisma.CatalogItemGetPayload<{
-  include: typeof itemDetailInclude;
-}>;
+  include: typeof itemDetailInclude
+}>
 
 @Injectable()
 export class CatalogItemsService {
@@ -44,35 +38,36 @@ export class CatalogItemsService {
     private readonly prismaService: PrismaService,
     private readonly categoriesService: CatalogCategoriesService,
     private readonly duplicatePolicyService: CatalogDuplicatePolicyService,
-    private readonly negotiationPolicyService: CatalogNegotiationPolicyService,
+    private readonly negotiationPolicyService: CatalogNegotiationPolicyService
   ) {}
 
-  async createItem(actor: CatalogActor, createCatalogItemDto: CreateCatalogItemDto) {
-    const sanitizedPayload = this.sanitizeItemInput(createCatalogItemDto);
+  async createItem(
+    actor: CatalogActor,
+    createCatalogItemDto: CreateCatalogItemDto
+  ) {
+    const sanitizedPayload = this.sanitizeItemInput(createCatalogItemDto)
 
-    await this.categoriesService.getCategoryOrThrow(sanitizedPayload.categoryId);
+    await this.categoriesService.getCategoryOrThrow(sanitizedPayload.categoryId)
     await this.duplicatePolicyService.assertNoDuplicateFreeItem(
       actor,
-      sanitizedPayload,
-    );
+      sanitizedPayload
+    )
 
-    const images = this.normalizeImages(sanitizedPayload.images);
+    const images = this.normalizeImages(sanitizedPayload.images)
     const publicationStatus =
-      sanitizedPayload.publicationStatus ??
-      CatalogItemPublicationStatus.DRAFT;
-    const shouldPublish = publicationStatus === CatalogItemPublicationStatus.ACTIVE;
+      sanitizedPayload.publicationStatus ?? CatalogItemPublicationStatus.DRAFT
+    const shouldPublish =
+      publicationStatus === CatalogItemPublicationStatus.ACTIVE
     const item = await this.prismaService.catalogItem.create({
       data: {
         ownerUserId: actor.userId,
         title: sanitizedPayload.title,
         normalizedTitle: normalizeCatalogText(sanitizedPayload.title),
-        titleTokenSignature: buildTitleTokenSignature(
-          sanitizedPayload.title,
-        ),
+        titleTokenSignature: buildTitleTokenSignature(sanitizedPayload.title),
         slug: await this.generateUniqueSlug(sanitizedPayload.title),
         description: sanitizedPayload.description,
         normalizedDescription: normalizeCatalogText(
-          sanitizedPayload.description,
+          sanitizedPayload.description
         ),
         categoryId: sanitizedPayload.categoryId,
         condition: sanitizedPayload.condition as never,
@@ -82,7 +77,7 @@ export class CatalogItemsService {
         publishedAt: shouldPublish ? new Date() : null,
         images: images.length
           ? {
-              create: images.map((image) => ({
+              create: images.map(image => ({
                 storageUrl: image.storageUrl,
                 storagePath: image.storagePath ?? null,
                 sortOrder: image.sortOrder,
@@ -92,32 +87,32 @@ export class CatalogItemsService {
           : undefined,
       },
       include: itemDetailInclude,
-    });
+    })
 
-    return this.serializeItem(item);
+    return this.serializeItem(item)
   }
 
   async updateItem(
     actor: CatalogActor,
     itemId: string,
-    updateCatalogItemDto: UpdateCatalogItemDto,
+    updateCatalogItemDto: UpdateCatalogItemDto
   ) {
     const existingItem = await this.prismaService.catalogItem.findUnique({
       where: {
         id: itemId,
       },
       include: itemDetailInclude,
-    });
+    })
 
     if (!existingItem || existingItem.deletedAt) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException('Catalog item not found')
     }
 
     if (existingItem.ownerUserId !== actor.userId) {
-      throw new ForbiddenException('You can only edit your own items');
+      throw new ForbiddenException('You can only edit your own items')
     }
 
-    const sanitizedUpdate = this.sanitizeItemInput(updateCatalogItemDto);
+    const sanitizedUpdate = this.sanitizeItemInput(updateCatalogItemDto)
 
     const nextState = {
       title: sanitizedUpdate.title ?? existingItem.title,
@@ -126,37 +121,37 @@ export class CatalogItemsService {
       condition: sanitizedUpdate.condition ?? existingItem.condition,
       images:
         sanitizedUpdate.images ??
-        existingItem.images.map((image) => ({
+        existingItem.images.map(image => ({
           storageUrl: image.storageUrl,
           storagePath: image.storagePath ?? undefined,
           sortOrder: image.sortOrder,
           isCover: image.isCover,
         })),
-    };
+    }
 
-    await this.categoriesService.getCategoryOrThrow(nextState.categoryId);
+    await this.categoriesService.getCategoryOrThrow(nextState.categoryId)
     await this.duplicatePolicyService.assertNoDuplicateFreeItem(
       actor,
       nextState,
-      itemId,
-    );
+      itemId
+    )
 
     const nextPublicationStatus =
-      sanitizedUpdate.publicationStatus ?? existingItem.publicationStatus;
+      sanitizedUpdate.publicationStatus ?? existingItem.publicationStatus
     const shouldPublish =
       !existingItem.publishedAt &&
-      nextPublicationStatus === CatalogItemPublicationStatus.ACTIVE;
+      nextPublicationStatus === CatalogItemPublicationStatus.ACTIVE
     const normalizedImages = sanitizedUpdate.images
       ? this.normalizeImages(sanitizedUpdate.images)
-      : null;
+      : null
 
-    const item = await this.prismaService.$transaction(async (tx) => {
+    const item = await this.prismaService.$transaction(async tx => {
       if (normalizedImages) {
         await tx.catalogItemImage.deleteMany({
           where: {
             catalogItemId: itemId,
           },
-        });
+        })
       }
 
       return tx.catalogItem.update({
@@ -168,13 +163,13 @@ export class CatalogItemsService {
             title: sanitizedUpdate.title,
             normalizedTitle: normalizeCatalogText(sanitizedUpdate.title),
             titleTokenSignature: buildTitleTokenSignature(
-              sanitizedUpdate.title,
+              sanitizedUpdate.title
             ),
           }),
           ...(sanitizedUpdate.description !== undefined && {
             description: sanitizedUpdate.description,
             normalizedDescription: normalizeCatalogText(
-              sanitizedUpdate.description,
+              sanitizedUpdate.description
             ),
           }),
           ...(sanitizedUpdate.categoryId !== undefined && {
@@ -197,7 +192,7 @@ export class CatalogItemsService {
           }),
           ...(normalizedImages && {
             images: {
-              create: normalizedImages.map((image) => ({
+              create: normalizedImages.map(image => ({
                 storageUrl: image.storageUrl,
                 storagePath: image.storagePath ?? null,
                 sortOrder: image.sortOrder,
@@ -207,10 +202,10 @@ export class CatalogItemsService {
           }),
         },
         include: itemDetailInclude,
-      });
-    });
+      })
+    })
 
-    return this.serializeItem(item);
+    return this.serializeItem(item)
   }
 
   async deleteItem(actor: CatalogActor, itemId: string) {
@@ -223,14 +218,14 @@ export class CatalogItemsService {
         ownerUserId: true,
         deletedAt: true,
       },
-    });
+    })
 
     if (!existingItem || existingItem.deletedAt) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException('Catalog item not found')
     }
 
     if (existingItem.ownerUserId !== actor.userId) {
-      throw new ForbiddenException('You can only delete your own items');
+      throw new ForbiddenException('You can only delete your own items')
     }
 
     await this.prismaService.catalogItem.update({
@@ -241,12 +236,12 @@ export class CatalogItemsService {
         deletedAt: new Date(),
         publicationStatus: CatalogItemPublicationStatus.INACTIVE as never,
       },
-    });
+    })
 
     return {
       success: true,
       itemId,
-    };
+    }
   }
 
   async listMyItems(actor: CatalogActor, query: ListCatalogItemsQueryDto) {
@@ -261,13 +256,13 @@ export class CatalogItemsService {
       include: itemDetailInclude,
       orderBy: [{ createdAt: 'desc' }],
       take: query.take ?? 20,
-    });
+    })
 
-    return Promise.all(items.map((item) => this.serializeItem(item)));
+    return Promise.all(items.map(item => this.serializeItem(item)))
   }
 
   async listPublicItems(query: ListCatalogItemsQueryDto) {
-    const publicationStatus = query.publicationStatus;
+    const publicationStatus = query.publicationStatus
     const items = await this.prismaService.catalogItem.findMany({
       where: {
         deletedAt: null,
@@ -279,9 +274,9 @@ export class CatalogItemsService {
       include: itemDetailInclude,
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       take: query.take ?? 20,
-    });
+    })
 
-    return Promise.all(items.map((item) => this.serializeItem(item)));
+    return Promise.all(items.map(item => this.serializeItem(item)))
   }
 
   async getItemDetail(itemId: string, actor?: CatalogActor) {
@@ -290,13 +285,13 @@ export class CatalogItemsService {
         id: itemId,
       },
       include: itemDetailInclude,
-    });
+    })
 
     if (!item || item.deletedAt) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException('Catalog item not found')
     }
 
-    const isOwner = actor?.userId === item.ownerUserId;
+    const isOwner = actor?.userId === item.ownerUserId
 
     if (
       !isOwner &&
@@ -305,14 +300,14 @@ export class CatalogItemsService {
         CatalogItemPublicationStatus.IN_NEGOTIATION,
       ].includes(item.publicationStatus as CatalogItemPublicationStatus)
     ) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException('Catalog item not found')
     }
 
-    return this.serializeItem(item);
+    return this.serializeItem(item)
   }
 
   async getOwnedActiveItemOrThrow(actor: CatalogActor, itemId: string) {
-    const item = await this.getOwnedItemOrThrow(actor, itemId);
+    const item = await this.getOwnedItemOrThrow(actor, itemId)
 
     if (
       ![
@@ -320,10 +315,10 @@ export class CatalogItemsService {
         CatalogItemPublicationStatus.IN_NEGOTIATION,
       ].includes(item.publicationStatus as CatalogItemPublicationStatus)
     ) {
-      throw new BadRequestException('Only active items can be offered');
+      throw new BadRequestException('Only active items can be offered')
     }
 
-    return item;
+    return item
   }
 
   async getOwnedItemOrThrow(actor: CatalogActor, itemId: string) {
@@ -331,17 +326,17 @@ export class CatalogItemsService {
       where: {
         id: itemId,
       },
-    });
+    })
 
     if (!item || item.deletedAt) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException('Catalog item not found')
     }
 
     if (item.ownerUserId !== actor.userId) {
-      throw new ForbiddenException('You can only use your own item');
+      throw new ForbiddenException('You can only use your own item')
     }
 
-    return item;
+    return item
   }
 
   async getPublicNegotiableItemOrThrow(itemId: string) {
@@ -349,10 +344,10 @@ export class CatalogItemsService {
       where: {
         id: itemId,
       },
-    });
+    })
 
     if (!item || item.deletedAt) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException('Catalog item not found')
     }
 
     if (
@@ -361,10 +356,10 @@ export class CatalogItemsService {
         CatalogItemPublicationStatus.IN_NEGOTIATION,
       ].includes(item.publicationStatus as CatalogItemPublicationStatus)
     ) {
-      throw new BadRequestException('Requested item is not available');
+      throw new BadRequestException('Requested item is not available')
     }
 
-    return item;
+    return item
   }
 
   async syncNegotiationStatus(itemId: string) {
@@ -377,14 +372,14 @@ export class CatalogItemsService {
         publicationStatus: true,
         deletedAt: true,
       },
-    });
+    })
 
     if (!item || item.deletedAt) {
-      return;
+      return
     }
 
     const activeNegotiationsCount =
-      await this.negotiationPolicyService.countActiveNegotiationsForItem(itemId);
+      await this.negotiationPolicyService.countActiveNegotiationsForItem(itemId)
 
     if (
       activeNegotiationsCount > 0 &&
@@ -395,10 +390,11 @@ export class CatalogItemsService {
           id: itemId,
         },
         data: {
-          publicationStatus: CatalogItemPublicationStatus.IN_NEGOTIATION as never,
+          publicationStatus:
+            CatalogItemPublicationStatus.IN_NEGOTIATION as never,
         },
-      });
-      return;
+      })
+      return
     }
 
     if (
@@ -412,15 +408,15 @@ export class CatalogItemsService {
         data: {
           publicationStatus: CatalogItemPublicationStatus.ACTIVE as never,
         },
-      });
+      })
     }
   }
 
   private async generateUniqueSlug(title: string) {
-    const base = slugifyCatalogTitle(title);
+    const base = slugifyCatalogTitle(title)
 
     if (!base) {
-      throw new BadRequestException('Title is invalid');
+      throw new BadRequestException('Title is invalid')
     }
 
     const existingCount = await this.prismaService.catalogItem.count({
@@ -429,13 +425,13 @@ export class CatalogItemsService {
           startsWith: base,
         },
       },
-    });
+    })
 
-    return existingCount === 0 ? base : `${base}-${existingCount + 1}`;
+    return existingCount === 0 ? base : `${base}-${existingCount + 1}`
   }
 
   private buildPublicationStatusFilter(
-    publicationStatus?: CatalogItemPublicationStatus,
+    publicationStatus?: CatalogItemPublicationStatus
   ) {
     if (!publicationStatus) {
       return {
@@ -445,7 +441,7 @@ export class CatalogItemsService {
             CatalogItemPublicationStatus.IN_NEGOTIATION,
           ] as never,
         },
-      };
+      }
     }
 
     if (publicationStatus === CatalogItemPublicationStatus.ACTIVE) {
@@ -456,41 +452,41 @@ export class CatalogItemsService {
             CatalogItemPublicationStatus.IN_NEGOTIATION,
           ] as never,
         },
-      };
+      }
     }
 
     return {
       publicationStatus: publicationStatus as never,
-    };
+    }
   }
 
   private normalizeImages(
-    images?: CreateCatalogItemDto['images'] | UpdateCatalogItemDto['images'],
+    images?: CreateCatalogItemDto['images'] | UpdateCatalogItemDto['images']
   ) {
     const normalized = (images ?? []).map((image, index) => ({
       storageUrl: image.storageUrl,
       storagePath: image.storagePath?.trim() || undefined,
       sortOrder: image.sortOrder ?? index,
       isCover: Boolean(image.isCover),
-    }));
+    }))
 
     if (!normalized.length) {
-      return normalized;
+      return normalized
     }
 
-    const firstCoverIndex = normalized.findIndex((image) => image.isCover);
+    const firstCoverIndex = normalized.findIndex(image => image.isCover)
 
     if (firstCoverIndex === -1) {
-      normalized[0].isCover = true;
+      normalized[0].isCover = true
     }
 
     if (firstCoverIndex > -1) {
       normalized.forEach((image, index) => {
-        image.isCover = index === firstCoverIndex;
-      });
+        image.isCover = index === firstCoverIndex
+      })
     }
 
-    return normalized.sort((left, right) => left.sortOrder - right.sortOrder);
+    return normalized.sort((left, right) => left.sortOrder - right.sortOrder)
   }
 
   private sanitizeItemInput<
@@ -511,12 +507,12 @@ export class CatalogItemsService {
           preserveNewLines: true,
         }),
       }),
-    };
+    }
   }
 
   private buildSearchFilter(search?: string) {
     if (!search) {
-      return {};
+      return {}
     }
 
     return {
@@ -534,12 +530,14 @@ export class CatalogItemsService {
           },
         },
       ],
-    };
+    }
   }
 
   private async serializeItem(item: CatalogItemWithRelations) {
     const activeNegotiationsCount =
-      await this.negotiationPolicyService.countActiveNegotiationsForItem(item.id);
+      await this.negotiationPolicyService.countActiveNegotiationsForItem(
+        item.id
+      )
 
     return {
       id: item.id,
@@ -557,8 +555,8 @@ export class CatalogItemsService {
       updatedAt: item.updatedAt,
       deletedAt: item.deletedAt,
       activeNegotiationsCount,
-      images: item.images.map((image) => this.serializeImage(image)),
-    };
+      images: item.images.map(image => this.serializeImage(image)),
+    }
   }
 
   private serializeCategory(category: CatalogCategory) {
@@ -569,7 +567,7 @@ export class CatalogItemsService {
       parentId: category.parentId,
       path: category.path,
       depth: category.depth,
-    };
+    }
   }
 
   private serializeImage(image: CatalogItemImage) {
@@ -580,6 +578,6 @@ export class CatalogItemsService {
       sortOrder: image.sortOrder,
       isCover: image.isCover,
       createdAt: image.createdAt,
-    };
+    }
   }
 }

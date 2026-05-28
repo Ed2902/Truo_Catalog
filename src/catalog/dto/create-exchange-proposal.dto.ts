@@ -1,18 +1,18 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator'
 
 export class CreateExchangeProposalDto {
   @IsString()
-  requestedItemId!: string;
+  requestedItemId!: string
 
   @IsString()
-  offeredItemId!: string;
+  offeredItemId!: string
 
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  message?: string;
+  message?: string
 
   @IsOptional()
   @IsBoolean()
-  isPublic?: boolean;
+  isPublic?: boolean
 }
