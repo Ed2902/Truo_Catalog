@@ -73,16 +73,7 @@ export class CatalogDuplicatePolicyService {
       const hasSameTitle =
         item.normalizedTitle === normalizedTitle ||
         item.titleTokenSignature === titleTokenSignature;
-      const hasSameDescription =
-        normalizedDescription.length > 0 &&
-        item.normalizedDescription === normalizedDescription;
-      const sharesImage = item.images.some((image) =>
-        [image.storagePath, image.storageUrl].some(
-          (value) => value && incomingImageKeys.has(value),
-        ),
-      );
-
-      return hasSameTitle && (hasSameDescription || sharesImage || true);
+      return hasSameTitle;
     });
 
     if (!duplicate) {

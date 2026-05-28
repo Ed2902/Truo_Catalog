@@ -2,6 +2,8 @@
 
 Base project for `Catalog_api` built from the shared NestJS infrastructure used in `Identity_api`.
 
+Catalog Phase 1 implementation details are documented in `docs/catalog-phase-1.md`.
+
 ## Included
 
 - Global config with environment validation

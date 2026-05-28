@@ -5,8 +5,11 @@ import {
 } from '@nestjs/common';
 import { CatalogCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizePlainText } from '../common/utils/sanitize-text.util';
 import { CreateCatalogCategoryDto } from './dto/create-catalog-category.dto';
 import { slugifyCatalogTitle } from './utils/catalog-normalization.util';
+
+const MAX_CATEGORY_LEVELS = 5;
 
 type SerializedCategory = {
   id: string;
@@ -29,6 +32,12 @@ export class CatalogCategoriesService {
   constructor(private readonly prismaService: PrismaService) {}
 
   async createCategory(createCatalogCategoryDto: CreateCatalogCategoryDto) {
+    const sanitizedName = sanitizePlainText(createCatalogCategoryDto.name);
+
+    if (!sanitizedName) {
+      throw new BadRequestException('Category name is invalid');
+    }
+
     const parent = createCatalogCategoryDto.parentId
       ? await this.prismaService.catalogCategory.findUnique({
           where: {
@@ -41,7 +50,13 @@ export class CatalogCategoriesService {
       throw new NotFoundException('Parent category not found');
     }
 
-    const slugBase = slugifyCatalogTitle(createCatalogCategoryDto.name);
+    if (parent && parent.depth >= MAX_CATEGORY_LEVELS - 1) {
+      throw new BadRequestException(
+        `Categories support a maximum depth of ${MAX_CATEGORY_LEVELS} levels`,
+      );
+    }
+
+    const slugBase = slugifyCatalogTitle(sanitizedName);
 
     if (!slugBase) {
       throw new BadRequestException('Category name is invalid');
@@ -65,7 +80,7 @@ export class CatalogCategoriesService {
 
     const category = await this.prismaService.catalogCategory.create({
       data: {
-        name: createCatalogCategoryDto.name.trim(),
+        name: sanitizedName,
         slug: slugBase,
         parentId: parent?.id ?? null,
         depth: parent ? parent.depth + 1 : 0,
