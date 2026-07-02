@@ -87,6 +87,11 @@ export class CatalogItemImagesService {
               existingImage.storagePath
             )
           : existingImage.storageUrl,
+        thumbnailUrl: existingImage.storagePath
+          ? this.storageService.createCatalogItemImageThumbnailUrl(
+              existingImage.storagePath
+            )
+          : null,
         storagePath: existingImage.storagePath,
         sortOrder: existingImage.sortOrder,
         isCover: existingImage.isCover,
@@ -161,6 +166,11 @@ export class CatalogItemImagesService {
         });
     });
 
+    await this.catalogItemsService.invalidateItemFeedCaches(
+      itemId,
+      actor.userId,
+    );
+
     return {
       id: image.id,
       catalogItemId: image.catalogItemId,
@@ -169,6 +179,11 @@ export class CatalogItemImagesService {
             image.storagePath
           )
         : image.storageUrl,
+      thumbnailUrl: image.storagePath
+        ? this.storageService.createCatalogItemImageThumbnailUrl(
+            image.storagePath
+          )
+        : null,
       storagePath: image.storagePath,
       sortOrder: image.sortOrder,
       isCover: image.isCover,

@@ -2,12 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { formatDateForTimeZone, isValidIanaTimeZone } from '../common/utils/time-zone.util';
 import { QueueService } from '../queue/queue.service';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class HealthService {
   constructor(
     private readonly configService: ConfigService,
     private readonly queueService: QueueService,
+    private readonly redisService: RedisService,
   ) {}
 
   getLiveness() {
@@ -20,7 +22,14 @@ export class HealthService {
   async getReadiness() {
     const now = new Date();
     const timeZone = this.configService.getOrThrow<string>('app.timeZone');
-    const queue = await this.queueService.ping();
+    const [queue, redisCache] = await Promise.all([
+      this.queueService.ping(),
+      this.redisService.getHealthSummary().catch((error) => ({
+        status: 'degraded',
+        role: 'cache',
+        message: error instanceof Error ? error.message : 'Unknown Redis error',
+      })),
+    ]);
 
     return {
       status: 'ok',
@@ -32,6 +41,7 @@ export class HealthService {
       localTime: isValidIanaTimeZone(timeZone)
         ? formatDateForTimeZone(now, timeZone)
         : now.toISOString(),
+      redisCache,
       queue,
     };
   }

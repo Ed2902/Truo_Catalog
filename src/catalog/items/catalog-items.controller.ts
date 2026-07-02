@@ -11,9 +11,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { DetailRateLimit } from '../../common/decorators/detail-rate-limit.decorator';
+import { HomeRateLimit } from '../../common/decorators/home-rate-limit.decorator';
 import { SensitiveRateLimit } from '../../common/decorators/sensitive-rate-limit.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../auth/guards/optional-jwt-auth.guard';
+import { RequestWithAuthenticatedUser } from '../../auth/interfaces/authenticated-request.interface';
 import { CatalogItemsService } from './catalog-items.service';
 import {
   CurrentCatalogActor,
@@ -91,13 +94,38 @@ export class CatalogItemsController {
     return this.catalogItemsService.listMyItems(actor, query);
   }
 
+  @Get('home-feed')
+  @UseGuards(OptionalJwtAuthGuard)
+  @HomeRateLimit()
+  getHomeFeed(
+    @Query() query: ListCatalogItemsQueryDto,
+    @Req() request: Request,
+  ) {
+    return this.catalogItemsService.getHomeFeed(
+      query,
+      resolveCatalogActorFromRequest(
+        request as RequestWithAuthenticatedUser,
+      ) ?? undefined,
+    );
+  }
+
   @Get()
-  listPublicItems(@Query() query: ListCatalogItemsQueryDto) {
-    return this.catalogItemsService.listPublicItems(query);
+  @UseGuards(OptionalJwtAuthGuard)
+  listPublicItems(
+    @Query() query: ListCatalogItemsQueryDto,
+    @Req() request: Request,
+  ) {
+    return this.catalogItemsService.listPublicItems(
+      query,
+      resolveCatalogActorFromRequest(
+        request as RequestWithAuthenticatedUser,
+      ) ?? undefined,
+    );
   }
 
   @Get(':itemId')
   @UseGuards(OptionalJwtAuthGuard)
+  @DetailRateLimit()
   getItemDetail(
     @Param('itemId') itemId: string,
     @Req() request: Request,

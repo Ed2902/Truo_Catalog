@@ -12,19 +12,21 @@ import { SYSTEM_QUEUE } from './queue.constants';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         connection: {
-          url: configService.getOrThrow<string>('redis.url'),
+          url: configService.getOrThrow<string>('redis.queueUrl'),
           lazyConnect: true,
           maxRetriesPerRequest: null,
           enableReadyCheck: false,
         },
         prefix: configService.getOrThrow<string>('queue.prefix'),
         defaultJobOptions: {
-          attempts: 3,
-          removeOnComplete: 1000,
-          removeOnFail: 5000,
+          attempts: configService.getOrThrow<number>('queue.maxRetries'),
+          removeOnComplete: configService.getOrThrow<number>(
+            'queue.removeOnComplete',
+          ),
+          removeOnFail: configService.getOrThrow<number>('queue.removeOnFail'),
           backoff: {
             type: 'exponential',
-            delay: 1000,
+            delay: configService.getOrThrow<number>('queue.backoffMs'),
           },
         },
       }),

@@ -110,16 +110,30 @@ export default () => {
     bucket: process.env.STORAGE_S3_BUCKET as string,
     forcePathStyle: parseBoolean(process.env.STORAGE_S3_FORCE_PATH_STYLE as string),
     publicBaseUrl: process.env.STORAGE_S3_PUBLIC_BASE_URL as string,
+    mediaCdnBaseUrl: process.env.STORAGE_MEDIA_CDN_BASE_URL?.trim() || undefined,
     maxUploadSize: parseNumber(process.env.STORAGE_MAX_UPLOAD_SIZE as string),
   },
   database: {
     url: process.env.DATABASE_URL as string,
   },
   redis: {
-    url: process.env.REDIS_URL as string,
+    cacheUrl: process.env.REDIS_CACHE_URL as string,
+    queueUrl: process.env.REDIS_QUEUE_URL as string,
+    realtimeUrl: process.env.REDIS_REALTIME_URL?.trim() || undefined,
+  },
+  catalogInternal: {
+    token:
+      process.env.CATALOG_INTERNAL_TOKEN?.trim() ||
+      'change-me-catalog-internal-token',
   },
   queue: {
     prefix: process.env.QUEUE_PREFIX as string,
+    maxRetries: parseOptionalNumber(process.env.REDIS_QUEUE_MAX_RETRIES) ?? 3,
+    backoffMs: parseOptionalNumber(process.env.REDIS_QUEUE_BACKOFF_MS) ?? 1000,
+    removeOnComplete:
+      parseOptionalNumber(process.env.REDIS_QUEUE_REMOVE_ON_COMPLETE) ?? 1000,
+    removeOnFail:
+      parseOptionalNumber(process.env.REDIS_QUEUE_REMOVE_ON_FAIL) ?? 5000,
   },
   auth: {
     accessTokenSecret: process.env.AUTH_ACCESS_TOKEN_SECRET as string,
@@ -154,6 +168,40 @@ export default () => {
     internalToken: process.env.CHAT_API_INTERNAL_TOKEN?.trim() || undefined,
     timeoutMs: parseOptionalNumber(process.env.CHAT_API_TIMEOUT_MS),
   },
+  stories: {
+    baseUrl: process.env.STORIES_API_BASE_URL?.trim() || undefined,
+    timeoutMs:
+      parseOptionalNumber(process.env.HOME_STORIES_TIMEOUT_MS) ??
+      parseOptionalNumber(process.env.STORIES_API_TIMEOUT_MS),
+  },
+  homePerformance: {
+    warnMs:
+      parseOptionalNumber(process.env.HOME_PERFORMANCE_BUDGET_WARN_MS) ?? 800,
+    criticalMs:
+      parseOptionalNumber(process.env.HOME_PERFORMANCE_BUDGET_CRITICAL_MS) ??
+      1200,
+    identityTimeoutMs:
+      parseOptionalNumber(process.env.HOME_IDENTITY_TIMEOUT_MS) ??
+      parseOptionalNumber(process.env.IDENTITY_SIGNALS_TIMEOUT_MS) ??
+      800,
+    storiesTimeoutMs:
+      parseOptionalNumber(process.env.HOME_STORIES_TIMEOUT_MS) ??
+      parseOptionalNumber(process.env.STORIES_API_TIMEOUT_MS) ??
+      1000,
+    ratingsTimeoutMs:
+      parseOptionalNumber(process.env.HOME_RATINGS_TIMEOUT_MS) ?? 500,
+    mediaTimeoutMs:
+      parseOptionalNumber(process.env.HOME_MEDIA_TIMEOUT_MS) ?? 500,
+    redisTimeoutMs:
+      parseOptionalNumber(process.env.HOME_REDIS_TIMEOUT_MS) ?? 250,
+    serializationConcurrency:
+      parseOptionalNumber(process.env.HOME_SERIALIZATION_CONCURRENCY) ?? 8,
+    circuitBreakerFailureThreshold:
+      parseOptionalNumber(process.env.HOME_CIRCUIT_BREAKER_FAILURE_THRESHOLD) ??
+      5,
+    circuitBreakerOpenMs:
+      parseOptionalNumber(process.env.HOME_CIRCUIT_BREAKER_OPEN_MS) ?? 15000,
+  },
   notifications: {
     baseUrl: process.env.NOTIFICATIONS_API_BASE_URL?.trim() || undefined,
     internalToken:
@@ -165,6 +213,20 @@ export default () => {
     limit: parseNumber(process.env.RATE_LIMIT_LIMIT as string),
     sensitiveTtl: parseNumber(process.env.SENSITIVE_RATE_LIMIT_TTL as string),
     sensitiveLimit: parseNumber(process.env.SENSITIVE_RATE_LIMIT_LIMIT as string),
+    homeTtl:
+      parseOptionalNumber(process.env.HOME_RATE_LIMIT_TTL) ??
+      parseNumber(process.env.RATE_LIMIT_TTL as string),
+    homeLimit: parseOptionalNumber(process.env.HOME_RATE_LIMIT_LIMIT) ?? 60,
+    detailTtl:
+      parseOptionalNumber(process.env.DETAIL_RATE_LIMIT_TTL) ??
+      parseNumber(process.env.RATE_LIMIT_TTL as string),
+    detailLimit:
+      parseOptionalNumber(process.env.DETAIL_RATE_LIMIT_LIMIT) ?? 120,
+    mediaUploadTtl:
+      parseOptionalNumber(process.env.MEDIA_UPLOAD_RATE_LIMIT_TTL) ??
+      parseNumber(process.env.SENSITIVE_RATE_LIMIT_TTL as string),
+    mediaUploadLimit:
+      parseOptionalNumber(process.env.MEDIA_UPLOAD_RATE_LIMIT_LIMIT) ?? 30,
   },
   };
 };

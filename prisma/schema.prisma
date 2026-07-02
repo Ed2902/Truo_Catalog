@@ -115,6 +115,13 @@ enum ExchangeDisputeMessageSenderType {
   SYSTEM
 }
 
+enum CatalogOutboxEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
 model CatalogCategory {
   id        String   @id @default(uuid())
   name      String
@@ -424,4 +431,25 @@ model ExchangeDisputeMessage {
   @@index([disputeId, createdAt])
   @@index([senderUserId, createdAt])
   @@index([senderAdminUserId, createdAt])
+}
+
+model CatalogOutboxEvent {
+  id            String                   @id @default(uuid())
+  topic         String
+  aggregateType String?
+  aggregateId   String?
+  payload       Json
+  status        CatalogOutboxEventStatus @default(PENDING)
+  attempts      Int                      @default(0)
+  maxAttempts   Int                      @default(5)
+  nextAttemptAt DateTime                 @default(now())
+  processedAt   DateTime?
+  failedAt      DateTime?
+  lastError     String?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([topic, createdAt])
+  @@index([aggregateType, aggregateId])
 }

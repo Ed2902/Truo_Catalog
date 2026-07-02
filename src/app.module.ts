@@ -12,6 +12,7 @@ import { HealthModule } from './health/health.module';
 import { AppLoggerModule } from './logger/logger.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { QueueModule } from './queue/queue.module';
     AppLoggerModule,
     CommonModule,
     PrismaModule,
+    RedisModule,
     QueueModule,
     HealthModule,
     CatalogModule,

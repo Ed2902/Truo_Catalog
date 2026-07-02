@@ -1,6 +1,6 @@
 import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { SensitiveRateLimit } from '../../common/decorators/sensitive-rate-limit.decorator';
+import { MediaUploadRateLimit } from '../../common/decorators/media-upload-rate-limit.decorator';
 import { CatalogItemImagesService } from './catalog-item-images.service';
 import { CurrentCatalogActor } from '../decorators/current-catalog-actor.decorator';
 import { ConfirmCatalogItemImageUploadDto } from '../dto/confirm-catalog-item-image-upload.dto';
@@ -15,7 +15,7 @@ export class CatalogItemImagesController {
   ) {}
 
   @Post('upload-url')
-  @SensitiveRateLimit()
+  @MediaUploadRateLimit()
   createUploadUrl(
     @CurrentCatalogActor() actor: CatalogActor,
     @Param('itemId') itemId: string,
@@ -29,7 +29,7 @@ export class CatalogItemImagesController {
   }
 
   @Post('confirm')
-  @SensitiveRateLimit()
+  @MediaUploadRateLimit()
   confirmUpload(
     @CurrentCatalogActor() actor: CatalogActor,
     @Param('itemId') itemId: string,

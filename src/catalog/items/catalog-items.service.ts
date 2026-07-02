@@ -2,18 +2,28 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { createHash, randomUUID } from 'crypto'
 import { CatalogCategory, CatalogItemImage, Prisma } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
+import { RedisService } from '../../redis/redis.service'
 import { StorageService } from '../../storage/storage.service'
 import { sanitizePlainText } from '../../common/utils/sanitize-text.util'
+import { HomePerformanceService } from '../../common/observability/home-performance.service'
+import { CircuitBreakerService } from '../../common/resilience/circuit-breaker.service'
 import { CatalogItemPublicationStatus } from '../shared/catalog.constants'
 import { CatalogCategoriesService } from '../categories/catalog-categories.service'
 import { CatalogDuplicatePolicyService } from './catalog-duplicate-policy.service'
 import { CatalogNegotiationPolicyService } from '../exchanges/catalog-negotiation-policy.service'
-import { IdentitySignalsService } from '../identity/identity-signals.service'
+import {
+  IdentityOwnerSummary,
+  IdentitySignalsService,
+} from '../identity/identity-signals.service'
 import { CatalogPublicationModerationService } from '../moderation/catalog-publication-moderation.service'
+import { CatalogOutboxService } from '../outbox/catalog-outbox.service'
 import { CreateCatalogItemDto } from '../dto/create-catalog-item.dto'
 import { ListCatalogItemsQueryDto } from '../dto/list-catalog-items-query.dto'
 import { UpdateCatalogItemDto } from '../dto/update-catalog-item.dto'
@@ -36,23 +46,89 @@ type CatalogItemWithRelations = Prisma.CatalogItemGetPayload<{
 }>
 
 const TRASH_RECOVERY_DAYS = 5
+const HOME_FEED_PAGE_CACHE_TTL_SECONDS = 20
+const HOME_FEED_SNAPSHOT_TTL_SECONDS = 120
+const HOME_FEED_CANDIDATE_LIMIT = 500
+const OWNER_SUMMARY_CACHE_TTL_SECONDS = 60
+const OWNER_RATING_CACHE_TTL_SECONDS = 5 * 60
+const ACTIVE_NEGOTIATION_CACHE_TTL_SECONDS = 30
+const MEDIA_READ_URL_CACHE_TTL_SECONDS = 5 * 60
 
 type CatalogOwnerRankingSignals = {
   ownerIsPremium: boolean
   ownerAverageRating: number | null
   ownerRatingCount: number
+  ownerFollowedByViewer: boolean
   score: number
+}
+
+type CatalogHomeFeedResponse = {
+  items: Array<Record<string, unknown>>
+  generatedAt: string
+  viewer: {
+    userId: string | null
+  }
+  pageInfo: {
+    take: number
+    feedVersion: string
+    cursor: string | null
+    nextCursor: string | null
+    hasMore: boolean
+  }
+}
+
+type CatalogPublicFeedPage = {
+  items: Array<Record<string, unknown>>
+  pageInfo: {
+    take: number
+    feedVersion: string
+    cursor: string | null
+    nextCursor: string | null
+    hasMore: boolean
+  }
+}
+
+type CatalogFeedCursor = {
+  feedVersion: string
+  position: number
+  score: number
+  publishedAt: string | null
+  id: string
+}
+
+type CatalogRankedFeedSnapshot = {
+  feedVersion: string
+  queryHash: string
+  generatedAt: string
+  items: Array<Record<string, unknown>>
+}
+
+type CatalogOwnerRatingSummary = {
+  averageRating: number | null
+  ratingCount: number
+}
+
+type CatalogOwnerSummaryCacheEntry = {
+  summary: IdentityOwnerSummary | null
+  isRestricted: boolean
 }
 
 @Injectable()
 export class CatalogItemsService {
+  private readonly logger = new Logger(CatalogItemsService.name)
+
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly redisService: RedisService,
     private readonly storageService: StorageService,
+    private readonly configService: ConfigService,
+    private readonly homePerformanceService: HomePerformanceService,
+    private readonly circuitBreakerService: CircuitBreakerService,
     private readonly categoriesService: CatalogCategoriesService,
     private readonly duplicatePolicyService: CatalogDuplicatePolicyService,
     private readonly negotiationPolicyService: CatalogNegotiationPolicyService,
     private readonly identitySignalsService: IdentitySignalsService,
+    private readonly catalogOutboxService: CatalogOutboxService,
     private readonly catalogPublicationModerationService: CatalogPublicationModerationService
   ) {}
 
@@ -117,6 +193,8 @@ export class CatalogItemsService {
       )
       item = await this.getItemWithRelationsOrThrow(item.id)
     }
+
+    await this.invalidateItemFeedCaches(item.id, item.ownerUserId)
 
     return this.serializeItem(item, { includeOwnerModerationReport: true })
   }
@@ -256,6 +334,8 @@ export class CatalogItemsService {
       item = await this.getItemWithRelationsOrThrow(item.id)
     }
 
+    await this.invalidateItemFeedCaches(item.id, item.ownerUserId)
+
     return this.serializeItem(item, { includeOwnerModerationReport: true })
   }
 
@@ -294,6 +374,8 @@ export class CatalogItemsService {
         publicationStatus: CatalogItemPublicationStatus.INACTIVE as never,
       },
     })
+
+    await this.invalidateItemFeedCaches(itemId, existingItem.ownerUserId)
 
     return {
       success: true,
@@ -365,6 +447,8 @@ export class CatalogItemsService {
     )
     item = await this.getItemWithRelationsOrThrow(item.id)
 
+    await this.invalidateItemFeedCaches(item.id, item.ownerUserId)
+
     return this.serializeItem(item, { includeOwnerModerationReport: true })
   }
 
@@ -412,8 +496,116 @@ export class CatalogItemsService {
     )
   }
 
-  async listPublicItems(query: ListCatalogItemsQueryDto) {
-    const items = await this.prismaService.catalogItem.findMany({
+  async getHomeFeed(
+    query: ListCatalogItemsQueryDto,
+    actor?: CatalogActor
+  ): Promise<CatalogHomeFeedResponse> {
+    const startedAt = Date.now()
+    const pageCacheKey = this.buildHomeFeedPageCacheKey(query, actor)
+    const cachedFeed =
+      await this.getCachedJson<CatalogHomeFeedResponse>(pageCacheKey)
+
+    if (cachedFeed) {
+      this.logger.log({
+        event: 'catalog.home_feed.page_cache',
+        result: 'hit',
+        durationMs: Date.now() - startedAt,
+        viewerUserId: actor?.userId ?? null,
+        take: query.take ?? 20,
+        hasCursor: Boolean(query.cursor),
+        feedVersion: cachedFeed.pageInfo.feedVersion,
+        itemsCount: cachedFeed.items.length,
+      })
+      return cachedFeed
+    }
+
+    const page = await this.buildPublicFeedPage(query, actor)
+
+    const response: CatalogHomeFeedResponse = {
+      items: page.items,
+      generatedAt: new Date().toISOString(),
+      viewer: {
+        userId: actor?.userId ?? null,
+      },
+      pageInfo: page.pageInfo,
+    }
+
+    await this.setCachedJson(
+      pageCacheKey,
+      response,
+      HOME_FEED_PAGE_CACHE_TTL_SECONDS
+    )
+    await this.catalogOutboxService.trackHomeFeedPage(
+      pageCacheKey,
+      this.extractOwnerUserIds(page.items),
+      actor?.userId ?? null
+    )
+
+    this.logger.log({
+      event: 'catalog.home_feed.page_cache',
+      result: 'miss',
+      durationMs: Date.now() - startedAt,
+      viewerUserId: actor?.userId ?? null,
+      take: query.take ?? 20,
+      hasCursor: Boolean(query.cursor),
+      feedVersion: response.pageInfo.feedVersion,
+      itemsCount: response.items.length,
+    })
+
+    return response
+  }
+
+  async listPublicItems(query: ListCatalogItemsQueryDto, actor?: CatalogActor) {
+    const page = await this.buildPublicFeedPage(query, actor)
+    return page.items
+  }
+
+  private async buildPublicFeedPage(
+    query: ListCatalogItemsQueryDto,
+    actor?: CatalogActor
+  ): Promise<CatalogPublicFeedPage> {
+    const take = query.take ?? 20
+    const queryHash = this.buildFeedQueryHash(query)
+    const cursor = query.cursor ? this.decodeFeedCursor(query.cursor) : null
+    const snapshot = cursor
+      ? await this.readFeedSnapshot(query, actor, cursor)
+      : await this.buildAndCacheFeedSnapshot(query, actor, queryHash)
+    const startIndex = cursor
+      ? this.resolveSnapshotStartIndex(snapshot, cursor)
+      : 0
+    const pageItems = snapshot.items.slice(startIndex, startIndex + take)
+    const hasMore = startIndex + take < snapshot.items.length
+    const lastItem = pageItems[pageItems.length - 1] ?? null
+    const nextCursor =
+      hasMore && lastItem
+        ? this.encodeFeedCursor({
+            feedVersion: snapshot.feedVersion,
+            position: startIndex + pageItems.length - 1,
+            score: this.resolveItemScore(lastItem),
+            publishedAt: this.resolveItemPublishedAt(lastItem),
+            id: String(lastItem.id),
+          })
+        : null
+
+    return {
+      items: pageItems,
+      pageInfo: {
+        take,
+        feedVersion: snapshot.feedVersion,
+        cursor: query.cursor ?? null,
+        nextCursor,
+        hasMore,
+      },
+    }
+  }
+
+  private async buildAndCacheFeedSnapshot(
+    query: ListCatalogItemsQueryDto,
+    actor: CatalogActor | undefined,
+    queryHash: string
+  ): Promise<CatalogRankedFeedSnapshot> {
+    const startedAt = Date.now()
+    const rows = await this.prismaService.catalogItem.findMany({
       where: {
         deletedAt: null,
         ...this.buildPublicPublicationStatusFilter(query.publicationStatus),
@@ -423,16 +615,39 @@ export class CatalogItemsService {
       },
       include: itemDetailInclude,
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-      take: query.take ?? 20,
+      take: HOME_FEED_CANDIDATE_LIMIT,
     })
 
-    const serializedItems = await Promise.all(
-      items.map(item => this.serializeItem(item))
+    const ownerSummariesResult = await this.getCachedOwnerSummaries(
+      [...new Set(rows.map(item => item.ownerUserId))],
+      actor
+    )
+    const visibleItems = rows.filter(
+      item => !ownerSummariesResult.hiddenUserIds.has(item.ownerUserId)
+    )
+    const activeNegotiationsByItemId =
+      await this.getCachedActiveNegotiationsCounts(
+        visibleItems.map(item => item.id)
+      )
+
+    const serializedItems = await this.mapWithConcurrency(
+      visibleItems,
+      this.getHomeSerializationConcurrency(),
+      item =>
+        this.serializeItem(item, {
+          activeNegotiationsCount:
+            activeNegotiationsByItemId.get(item.id) ?? 0,
+          ownerSummary:
+            ownerSummariesResult.summaries.get(item.ownerUserId) ?? null,
+        })
     )
     const rankingSignalsByOwner =
-      await this.buildCatalogOwnerRankingSignals(serializedItems)
+      await this.buildCatalogOwnerRankingSignals(
+        serializedItems,
+        ownerSummariesResult.summaries
+      )
 
-    return serializedItems
+    const rankedItems = serializedItems
       .map(item => {
         const rankingSignals =
           rankingSignalsByOwner.get(item.ownerUserId) ??
@@ -456,6 +671,836 @@ export class CatalogItemsService {
           new Date(left.publishedAt ?? left.createdAt).getTime()
         )
       })
+    const snapshot: CatalogRankedFeedSnapshot = {
+      feedVersion: query.feedVersion?.trim() || randomUUID(),
+      queryHash,
+      generatedAt: new Date().toISOString(),
+      items: rankedItems,
+    }
+
+    const snapshotCacheKey = this.buildFeedSnapshotCacheKey(
+      query,
+      actor,
+      snapshot.feedVersion
+    )
+
+    await this.setCachedJson(
+      snapshotCacheKey,
+      snapshot,
+      HOME_FEED_SNAPSHOT_TTL_SECONDS
+    )
+    await this.catalogOutboxService.trackHomeFeedSnapshot(
+      snapshotCacheKey,
+      this.extractOwnerUserIds(rankedItems),
+      actor?.userId ?? null
+    )
+
+    this.homePerformanceService.addDuration(
+      'snapshotBuild',
+      Date.now() - startedAt
+    )
+
+    this.logger.log({
+      event: 'catalog.home_feed.snapshot_built',
+      durationMs: Date.now() - startedAt,
+      viewerUserId: actor?.userId ?? null,
+      feedVersion: snapshot.feedVersion,
+      candidateRowsCount: rows.length,
+      visibleItemsCount: visibleItems.length,
+      rankedItemsCount: rankedItems.length,
+      hiddenOwnersCount: ownerSummariesResult.hiddenUserIds.size,
+      identityDegraded: Boolean(ownerSummariesResult.degraded),
+    })
+
+    return snapshot
+  }
+
+  private buildHomeFeedPageCacheKey(
+    query: ListCatalogItemsQueryDto,
+    actor?: CatalogActor
+  ) {
+    return `catalog:home-feed:page:${actor?.userId ?? 'anonymous'}:${this.hashJson({
+      query: this.normalizeFeedQuery(query),
+      take: query.take ?? 20,
+      cursor: query.cursor ?? null,
+      feedVersion: query.feedVersion ?? null,
+    })}`
+  }
+
+  private buildFeedSnapshotCacheKey(
+    query: ListCatalogItemsQueryDto,
+    actor: CatalogActor | undefined,
+    feedVersion: string
+  ) {
+    return `catalog:home-feed:snapshot:${actor?.userId ?? 'anonymous'}:${feedVersion}:${this.buildFeedQueryHash(query)}`
+  }
+
+  private buildFeedQueryHash(query: ListCatalogItemsQueryDto) {
+    return this.hashJson(this.normalizeFeedQuery(query))
+  }
+
+  private normalizeFeedQuery(query: ListCatalogItemsQueryDto) {
+    return {
+      categoryId: query.categoryId ?? null,
+      ownerUserId: query.ownerUserId ?? null,
+      search: query.search?.trim() || null,
+      publicationStatus: query.publicationStatus ?? null,
+    }
+  }
+
+  private async readFeedSnapshot(
+    query: ListCatalogItemsQueryDto,
+    actor: CatalogActor | undefined,
+    cursor: CatalogFeedCursor
+  ) {
+    const snapshot = await this.getCachedJson<CatalogRankedFeedSnapshot>(
+      this.buildFeedSnapshotCacheKey(query, actor, cursor.feedVersion)
+    )
+
+    if (!snapshot) {
+      this.logger.warn({
+        event: 'catalog.home_feed.snapshot_cache',
+        result: 'miss',
+        viewerUserId: actor?.userId ?? null,
+        feedVersion: cursor.feedVersion,
+      })
+      throw new BadRequestException(
+        'Feed cursor expired. Refresh the feed from the first page.'
+      )
+    }
+
+    this.logger.log({
+      event: 'catalog.home_feed.snapshot_cache',
+      result: 'hit',
+      viewerUserId: actor?.userId ?? null,
+      feedVersion: cursor.feedVersion,
+      itemsCount: snapshot.items.length,
+    })
+
+    if (snapshot.queryHash !== this.buildFeedQueryHash(query)) {
+      throw new BadRequestException('Feed cursor does not match this query')
+    }
+
+    return snapshot
+  }
+
+  private resolveSnapshotStartIndex(
+    snapshot: CatalogRankedFeedSnapshot,
+    cursor: CatalogFeedCursor
+  ) {
+    const itemAtPosition = snapshot.items[cursor.position]
+
+    if (itemAtPosition?.id === cursor.id) {
+      return cursor.position + 1
+    }
+
+    const fallbackIndex = snapshot.items.findIndex(
+      item =>
+        item.id === cursor.id &&
+        this.resolveItemScore(item) === cursor.score &&
+        this.resolveItemPublishedAt(item) === cursor.publishedAt
+    )
+
+    if (fallbackIndex === -1) {
+      throw new BadRequestException('Feed cursor is no longer valid')
+    }
+
+    return fallbackIndex + 1
+  }
+
+  private encodeFeedCursor(cursor: CatalogFeedCursor) {
+    return Buffer.from(JSON.stringify(cursor)).toString('base64url')
+  }
+
+  private decodeFeedCursor(cursor: string): CatalogFeedCursor {
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(cursor, 'base64url').toString('utf8')
+      ) as Partial<CatalogFeedCursor>
+
+      if (
+        !parsed.feedVersion ||
+        typeof parsed.position !== 'number' ||
+        typeof parsed.score !== 'number' ||
+        !parsed.id
+      ) {
+        throw new Error('Incomplete cursor')
+      }
+
+      return {
+        feedVersion: parsed.feedVersion,
+        position: parsed.position,
+        score: parsed.score,
+        publishedAt: parsed.publishedAt ?? null,
+        id: parsed.id,
+      }
+    } catch {
+      throw new BadRequestException('Invalid feed cursor')
+    }
+  }
+
+  private resolveItemScore(item: Record<string, unknown>) {
+    const rankingSignals = item.rankingSignals as
+      | { score?: number }
+      | null
+      | undefined
+
+    return rankingSignals?.score ?? 0
+  }
+
+  private resolveItemPublishedAt(item: Record<string, unknown>) {
+    const publishedAt = item.publishedAt ?? item.createdAt ?? null
+
+    if (!publishedAt) {
+      return null
+    }
+
+    return new Date(publishedAt as string | Date).toISOString()
+  }
+
+  private extractOwnerUserIds(items: Array<Record<string, unknown>>) {
+    return [
+      ...new Set(
+        items
+          .map(item => item.ownerUserId)
+          .filter((ownerUserId): ownerUserId is string =>
+            typeof ownerUserId === 'string'
+          )
+      ),
+    ]
+  }
+
+  private hashJson(value: unknown) {
+    return createHash('sha256')
+      .update(JSON.stringify(value))
+      .digest('hex')
+      .slice(0, 24)
+  }
+
+  private async getCachedJson<T>(key: string) {
+    const startedAt = Date.now()
+    try {
+      const value = await this.withTimeout(
+        'redisRead',
+        this.getHomeRedisTimeoutMs(),
+        this.circuitBreakerService.execute('redis-cache', () =>
+          this.redisService.getJson<T>(key)
+        )
+      )
+      this.homePerformanceService.recordRedisRead({
+        durationMs: Date.now() - startedAt,
+        hit: value !== null && value !== undefined,
+      })
+      return value
+    } catch (error) {
+      const durationMs = Date.now() - startedAt
+      this.homePerformanceService.recordRedisRead({
+        durationMs,
+        error: true,
+      })
+      this.homePerformanceService.addDegraded(
+        'redisCache',
+        'read_failed',
+        durationMs
+      )
+      this.logger.warn({ err: error, key }, 'Redis cache read failed')
+      return null
+    }
+  }
+
+  private async setCachedJson(
+    key: string,
+    value: unknown,
+    ttlSeconds: number
+  ) {
+    const startedAt = Date.now()
+    try {
+      await this.withTimeout(
+        'redisWrite',
+        this.getHomeRedisTimeoutMs(),
+        this.circuitBreakerService.execute('redis-cache', () =>
+          this.redisService.setJson(key, value, ttlSeconds)
+        )
+      )
+      this.homePerformanceService.recordRedisWrite({
+        durationMs: Date.now() - startedAt,
+      })
+    } catch (error) {
+      this.homePerformanceService.recordRedisWrite({
+        durationMs: Date.now() - startedAt,
+        error: true,
+      })
+      this.homePerformanceService.addDegraded(
+        'redisCache',
+        'write_failed',
+        Date.now() - startedAt
+      )
+      this.logger.warn({ err: error, key }, 'Redis cache write failed')
+    }
+  }
+
+  private async getCachedJsonMap<T>(keys: string[]) {
+    const startedAt = Date.now()
+    const uniqueKeys = [...new Set(keys.filter(Boolean))]
+
+    try {
+      const valuesByKey = await this.withTimeout(
+        'redisRead',
+        this.getHomeRedisTimeoutMs(),
+        this.circuitBreakerService.execute('redis-cache', () =>
+          this.redisService.mgetJson<T>(uniqueKeys)
+        )
+      )
+      const durationMs = Date.now() - startedAt
+
+      for (const key of uniqueKeys) {
+        this.homePerformanceService.recordRedisRead({
+          durationMs,
+          hit: valuesByKey.has(key),
+        })
+      }
+
+      return valuesByKey
+    } catch (error) {
+      const durationMs = Date.now() - startedAt
+
+      for (const key of uniqueKeys) {
+        this.homePerformanceService.recordRedisRead({
+          durationMs,
+          error: true,
+        })
+      }
+
+      this.homePerformanceService.addDegraded(
+        'redisCache',
+        'batch_read_failed',
+        durationMs
+      )
+      this.logger.warn(
+        { err: error, keysCount: uniqueKeys.length },
+        'Redis cache batch read failed'
+      )
+      return new Map<string, T>()
+    }
+  }
+
+  private async setCachedJsonMap(
+    entries: Array<{ key: string; value: unknown }>,
+    ttlSeconds: number
+  ) {
+    const startedAt = Date.now()
+
+    try {
+      await this.withTimeout(
+        'redisWrite',
+        this.getHomeRedisTimeoutMs(),
+        this.circuitBreakerService.execute('redis-cache', () =>
+          this.redisService.msetJson(entries, ttlSeconds)
+        )
+      )
+
+      for (const entry of entries) {
+        this.homePerformanceService.recordRedisWrite({
+          durationMs: Date.now() - startedAt,
+          error: !entry.key,
+        })
+      }
+    } catch (error) {
+      const durationMs = Date.now() - startedAt
+
+      for (const entry of entries) {
+        this.homePerformanceService.recordRedisWrite({
+          durationMs,
+          error: true,
+        })
+      }
+
+      this.homePerformanceService.addDegraded(
+        'redisCache',
+        'batch_write_failed',
+        durationMs
+      )
+      this.logger.warn(
+        { err: error, entriesCount: entries.length },
+        'Redis cache batch write failed'
+      )
+    }
+  }
+
+  private getHomeTimeoutMs(
+    key: 'ratingsTimeoutMs' | 'mediaTimeoutMs' | 'redisTimeoutMs'
+  ) {
+    const fallbacks = {
+      ratingsTimeoutMs: 500,
+      mediaTimeoutMs: 500,
+      redisTimeoutMs: 250,
+    }
+
+    return (
+      this.configService.get<number | undefined>(`homePerformance.${key}`) ??
+      fallbacks[key]
+    )
+  }
+
+  private getHomeRedisTimeoutMs() {
+    return this.getHomeTimeoutMs('redisTimeoutMs')
+  }
+
+  private getHomeSerializationConcurrency() {
+    return (
+      this.configService.get<number | undefined>(
+        'homePerformance.serializationConcurrency'
+      ) ?? 8
+    )
+  }
+
+  private async mapWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    mapper: (item: T, index: number) => Promise<R>
+  ) {
+    const results: R[] = new Array(items.length)
+    let nextIndex = 0
+    const workerCount = Math.max(1, Math.min(concurrency, items.length))
+
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (nextIndex < items.length) {
+          const currentIndex = nextIndex
+          nextIndex += 1
+          results[currentIndex] = await mapper(items[currentIndex], currentIndex)
+        }
+      })
+    )
+
+    return results
+  }
+
+  private async withTimeout<T>(
+    component: string,
+    timeoutMs: number,
+    operation: Promise<T>
+  ) {
+    let timeout: NodeJS.Timeout | undefined
+
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<T>((_, reject) => {
+          timeout = setTimeout(() => {
+            this.homePerformanceService.addTimeout(component, timeoutMs)
+            this.logger.warn({
+              event: 'catalog.home.component_timeout',
+              component,
+              timeoutMs,
+            })
+            reject(new Error(`${component} exceeded ${timeoutMs}ms`))
+          }, timeoutMs)
+        }),
+      ])
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+    }
+  }
+
+  private async getCachedOwnerSummaries(
+    userIds: string[],
+    actor?: CatalogActor
+  ) {
+    const viewerKey = actor?.userId ?? 'anonymous'
+    const uniqueUserIds = [...new Set(userIds.filter(Boolean))]
+    const summaries = new Map<string, IdentityOwnerSummary>()
+    const hiddenUserIds = new Set<string>()
+    const missingUserIds: string[] = []
+    const cacheKeysByUserId = new Map(
+      uniqueUserIds.map(userId => [
+        userId,
+        `catalog:owner-summary:${viewerKey}:${userId}`,
+      ])
+    )
+    const cachedEntries =
+      await this.getCachedJsonMap<CatalogOwnerSummaryCacheEntry>(
+        Array.from(cacheKeysByUserId.values())
+      )
+
+    for (const userId of uniqueUserIds) {
+      const cacheKey = cacheKeysByUserId.get(userId) as string
+      const cachedEntry = cachedEntries.get(cacheKey)
+
+      if (!cachedEntry) {
+        missingUserIds.push(userId)
+        continue
+      }
+
+      if (cachedEntry.isRestricted) {
+        hiddenUserIds.add(userId)
+      }
+
+      if (cachedEntry.summary) {
+        summaries.set(userId, cachedEntry.summary)
+      }
+    }
+
+    if (!missingUserIds.length) {
+      return {
+        summaries,
+        hiddenUserIds,
+        degraded: false,
+      }
+    }
+
+    const freshResult = await this.identitySignalsService.getOwnerSummaries(
+      missingUserIds,
+      actor
+    )
+
+    if (freshResult.degraded && actor) {
+      for (const userId of missingUserIds) {
+        hiddenUserIds.add(userId)
+      }
+
+      this.homePerformanceService.addDegraded(
+        'identityOwnerSummaries',
+        'fail_closed_missing_owner_summaries'
+      )
+      this.homePerformanceService.addFallback(
+        'visibility',
+        'hide_unverified_owners'
+      )
+
+      this.logger.warn({
+        event: 'catalog.home.degraded_component',
+        component: 'identityOwnerSummaries',
+        reason: 'fail_closed_missing_owner_summaries',
+        viewerUserId: actor.userId,
+        hiddenOwnersCount: missingUserIds.length,
+      })
+
+      return {
+        summaries,
+        hiddenUserIds,
+        degraded: true,
+      }
+    }
+
+    const shouldCacheFreshResult =
+      freshResult.summaries.size > 0 || freshResult.hiddenUserIds.size > 0
+
+    const freshCacheEntries: Array<{ key: string; value: unknown }> = []
+
+    for (const userId of missingUserIds) {
+      const summary = freshResult.summaries.get(userId) ?? null
+      const isRestricted =
+        freshResult.hiddenUserIds.has(userId) || Boolean(summary?.isRestricted)
+
+      if (isRestricted) {
+        hiddenUserIds.add(userId)
+      }
+
+      if (summary) {
+        summaries.set(userId, summary)
+      }
+
+      if (shouldCacheFreshResult) {
+        freshCacheEntries.push({
+          key: cacheKeysByUserId.get(userId) as string,
+          value: {
+            summary,
+            isRestricted,
+          } satisfies CatalogOwnerSummaryCacheEntry,
+        })
+      }
+    }
+
+    if (freshCacheEntries.length) {
+      await this.setCachedJsonMap(
+        freshCacheEntries,
+        OWNER_SUMMARY_CACHE_TTL_SECONDS
+      )
+    }
+
+    return {
+      summaries,
+      hiddenUserIds,
+      degraded: Boolean(freshResult.degraded),
+    }
+  }
+
+  private async getCachedOwnerRatings(userIds: string[]) {
+    const startedAt = Date.now()
+    const uniqueUserIds = [...new Set(userIds.filter(Boolean))]
+    const ratingsByOwner = new Map<string, CatalogOwnerRatingSummary>()
+    const missingUserIds: string[] = []
+    let cacheHits = 0
+    let cacheMisses = 0
+    const cacheKeysByUserId = new Map(
+      uniqueUserIds.map(userId => [userId, `catalog:owner-rating:${userId}`])
+    )
+
+    this.homePerformanceService.recordRatings({
+      ownersRequested: uniqueUserIds.length,
+    })
+
+    try {
+      const cachedRatings =
+        await this.getCachedJsonMap<CatalogOwnerRatingSummary>(
+          Array.from(cacheKeysByUserId.values())
+        )
+
+      for (const userId of uniqueUserIds) {
+        const cachedRating = cachedRatings.get(
+          cacheKeysByUserId.get(userId) as string
+        )
+
+        if (cachedRating) {
+          cacheHits += 1
+          ratingsByOwner.set(userId, cachedRating)
+          continue
+        }
+
+        cacheMisses += 1
+        missingUserIds.push(userId)
+      }
+
+      this.homePerformanceService.recordRatings({
+        cacheHits,
+        cacheMisses,
+      })
+
+      if (!missingUserIds.length) {
+        return ratingsByOwner
+      }
+
+      const ownerRatingGroups = await this.withTimeout(
+        'ratings',
+        this.getHomeTimeoutMs('ratingsTimeoutMs'),
+        this.prismaService.exchangeMatchFeedback.groupBy({
+          by: ['reviewedUserId'],
+          where: {
+            reviewedUserId: {
+              in: missingUserIds,
+            },
+            wasEffectiveInPerson: true,
+          },
+          _avg: {
+            rating: true,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      )
+      const freshRatingsMap = new Map(
+        ownerRatingGroups.map(group => [
+          group.reviewedUserId,
+          {
+            averageRating: group._avg.rating ?? null,
+            ratingCount: group._count._all,
+          } satisfies CatalogOwnerRatingSummary,
+        ])
+      )
+
+      await this.setCachedJsonMap(
+        missingUserIds.map(userId => {
+          const rating = freshRatingsMap.get(userId) ?? {
+            averageRating: null,
+            ratingCount: 0,
+          }
+
+          ratingsByOwner.set(userId, rating)
+          return {
+            key: cacheKeysByUserId.get(userId) as string,
+            value: rating,
+          }
+        }),
+        OWNER_RATING_CACHE_TTL_SECONDS
+      )
+
+      return ratingsByOwner
+    } catch (error) {
+      this.homePerformanceService.recordRatings({
+        fallbackOwners: missingUserIds.length || uniqueUserIds.length,
+      })
+      this.homePerformanceService.addDegraded('ratings', 'ratings_failed')
+      this.homePerformanceService.addFallback(
+        'ratings',
+        'missing_ratings_as_null'
+      )
+      this.logger.warn({
+        event: 'catalog.home.degraded_component',
+        component: 'ratings',
+        reason: 'ratings_failed',
+        err: error,
+        ownersCount: uniqueUserIds.length,
+        missingOwnersCount: missingUserIds.length,
+      })
+
+      return ratingsByOwner
+    } finally {
+      this.homePerformanceService.addDuration(
+        'ratings',
+        Date.now() - startedAt
+      )
+    }
+  }
+
+  private async getCachedActiveNegotiationsCount(itemId: string) {
+    const startedAt = Date.now()
+    const cacheKey = `catalog:item:${itemId}:active-negotiations`
+    this.homePerformanceService.recordActiveNegotiations({ requested: 1 })
+
+    try {
+      const cachedCount = await this.getCachedJson<number>(cacheKey)
+
+      if (typeof cachedCount === 'number') {
+        this.homePerformanceService.recordActiveNegotiations({ cacheHits: 1 })
+        return cachedCount
+      }
+
+      this.homePerformanceService.recordActiveNegotiations({ cacheMisses: 1 })
+      const activeNegotiationsCount =
+        await this.negotiationPolicyService.countActiveNegotiationsForItem(
+          itemId
+        )
+      await this.setCachedJson(
+        cacheKey,
+        activeNegotiationsCount,
+        ACTIVE_NEGOTIATION_CACHE_TTL_SECONDS
+      )
+
+      return activeNegotiationsCount
+    } catch (error) {
+      this.homePerformanceService.recordActiveNegotiations({ errors: 1 })
+      this.homePerformanceService.addDegraded(
+        'activeNegotiations',
+        'count_failed'
+      )
+      this.homePerformanceService.addFallback(
+        'activeNegotiations',
+        'count_as_zero'
+      )
+      this.logger.warn({
+        event: 'catalog.home.degraded_component',
+        component: 'activeNegotiations',
+        reason: 'count_failed',
+        err: error,
+        itemId,
+      })
+
+      return 0
+    } finally {
+      this.homePerformanceService.addDuration(
+        'activeNegotiations',
+        Date.now() - startedAt
+      )
+    }
+  }
+
+  private async getCachedActiveNegotiationsCounts(itemIds: string[]) {
+    const startedAt = Date.now()
+    const uniqueItemIds = [...new Set(itemIds.filter(Boolean))]
+    const countsByItemId = new Map<string, number>()
+    const missingItemIds: string[] = []
+    const cacheKeysByItemId = new Map(
+      uniqueItemIds.map(itemId => [
+        itemId,
+        `catalog:item:${itemId}:active-negotiations`,
+      ])
+    )
+
+    this.homePerformanceService.recordActiveNegotiations({
+      requested: uniqueItemIds.length,
+    })
+
+    try {
+      const cachedCounts = await this.getCachedJsonMap<number>(
+        Array.from(cacheKeysByItemId.values())
+      )
+
+      for (const itemId of uniqueItemIds) {
+        const cachedCount = cachedCounts.get(
+          cacheKeysByItemId.get(itemId) as string
+        )
+
+        if (typeof cachedCount === 'number') {
+          countsByItemId.set(itemId, cachedCount)
+          continue
+        }
+
+        missingItemIds.push(itemId)
+      }
+      this.homePerformanceService.recordActiveNegotiations({
+        cacheHits: uniqueItemIds.length - missingItemIds.length,
+        cacheMisses: missingItemIds.length,
+      })
+
+      if (!missingItemIds.length) {
+        return countsByItemId
+      }
+
+      const freshCounts =
+        await this.negotiationPolicyService.countActiveNegotiationsForItems(
+          missingItemIds
+        )
+
+      await this.setCachedJsonMap(
+        missingItemIds.map(itemId => {
+          const count = freshCounts.get(itemId) ?? 0
+          countsByItemId.set(itemId, count)
+          return {
+            key: cacheKeysByItemId.get(itemId) as string,
+            value: count,
+          }
+        }),
+        ACTIVE_NEGOTIATION_CACHE_TTL_SECONDS
+      )
+
+      return countsByItemId
+    } catch (error) {
+      this.homePerformanceService.recordActiveNegotiations({
+        errors: missingItemIds.length || uniqueItemIds.length,
+      })
+      this.homePerformanceService.addDegraded(
+        'activeNegotiations',
+        'batch_count_failed'
+      )
+      this.homePerformanceService.addFallback(
+        'activeNegotiations',
+        'batch_counts_as_zero'
+      )
+      this.logger.warn({
+        event: 'catalog.home.degraded_component',
+        component: 'activeNegotiations',
+        reason: 'batch_count_failed',
+        err: error,
+        itemsCount: uniqueItemIds.length,
+        missingItemsCount: missingItemIds.length,
+      })
+
+      for (const itemId of missingItemIds) {
+        countsByItemId.set(itemId, 0)
+      }
+
+      return countsByItemId
+    } finally {
+      this.homePerformanceService.addDuration(
+        'activeNegotiations',
+        Date.now() - startedAt
+      )
+    }
+  }
+
+  async invalidateItemFeedCaches(itemId: string, ownerUserId?: string) {
+    await this.catalogOutboxService.emitItemChanged({
+      itemId,
+      ownerUserId,
+    })
+  }
+
+  async invalidateOwnerRankingCaches(ownerUserId: string) {
+    await this.catalogOutboxService.emitOwnerRatingChanged(ownerUserId)
   }
 
   async getItemDetail(itemId: string, actor?: CatalogActor) {
@@ -482,12 +1527,22 @@ export class CatalogItemsService {
       throw new NotFoundException('Catalog item not found')
     }
 
+    const ownerSummariesResult = await this.getCachedOwnerSummaries(
+      [item.ownerUserId],
+      actor
+    )
+
+    if (ownerSummariesResult.hiddenUserIds.has(item.ownerUserId)) {
+      throw new NotFoundException('Catalog item not found')
+    }
+
     const serializedItem = await this.serializeItem(item, {
       includeOwnerModerationReport: isOwner,
+      ownerSummary: ownerSummariesResult.summaries.get(item.ownerUserId) ?? null,
     })
     const rankingSignalsByOwner = await this.buildCatalogOwnerRankingSignals([
       serializedItem,
-    ])
+    ], ownerSummariesResult.summaries)
 
     return {
       ...serializedItem,
@@ -527,6 +1582,8 @@ export class CatalogItemsService {
       include: itemDetailInclude,
     })
 
+    await this.invalidateItemFeedCaches(item.id, item.ownerUserId)
+
     return this.serializeItem(item, { includeOwnerModerationReport: true })
   }
 
@@ -537,6 +1594,7 @@ export class CatalogItemsService {
       },
       select: {
         id: true,
+        ownerUserId: true,
         deletedAt: true,
       },
     })
@@ -569,6 +1627,8 @@ export class CatalogItemsService {
           : {}),
       },
     })
+
+    await this.invalidateItemFeedCaches(itemId, existingItem.ownerUserId)
 
     return {
       success: true,
@@ -656,6 +1716,7 @@ export class CatalogItemsService {
       },
       select: {
         id: true,
+        ownerUserId: true,
         publicationStatus: true,
         deletedAt: true,
       },
@@ -678,9 +1739,10 @@ export class CatalogItemsService {
         },
         data: {
           publicationStatus:
-            CatalogItemPublicationStatus.IN_NEGOTIATION as never,
+          CatalogItemPublicationStatus.IN_NEGOTIATION as never,
         },
       })
+      await this.invalidateItemFeedCaches(itemId, item.ownerUserId)
       return
     }
 
@@ -697,6 +1759,8 @@ export class CatalogItemsService {
         },
       })
     }
+
+    await this.invalidateItemFeedCaches(itemId, item.ownerUserId)
   }
 
   private async generateUniqueSlug(title: string) {
@@ -896,38 +1960,57 @@ export class CatalogItemsService {
     item: CatalogItemWithRelations,
     options?: {
       includeOwnerModerationReport?: boolean
+      ownerSummary?: IdentityOwnerSummary | null
+      activeNegotiationsCount?: number
     }
   ) {
-    const activeNegotiationsCount =
-      await this.negotiationPolicyService.countActiveNegotiationsForItem(
-        item.id
-      )
+    const startedAt = Date.now()
 
-    return {
-      id: item.id,
-      ownerUserId: item.ownerUserId,
-      title: item.title,
-      slug: item.slug,
-      description: item.description,
-      category: this.serializeCategory(item.category),
-      condition: item.condition,
-      subjectiveValue: item.subjectiveValue,
-      exchangePreferences: item.exchangePreferences,
-      publicationStatus: item.publicationStatus,
-      publishedAt: item.publishedAt,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-      deletedAt: item.deletedAt,
-      trashExpiresAt: item.trashExpiresAt,
-      activeNegotiationsCount,
-      ...(options?.includeOwnerModerationReport
-        ? {
-            ownerModerationReport: item.ownerModerationReport,
-          }
-        : {}),
-      images: await Promise.all(
-        item.images.map(image => this.serializeImage(image))
-      ),
+    try {
+      const activeNegotiationsCount =
+        options?.activeNegotiationsCount ??
+        await this.getCachedActiveNegotiationsCount(item.id)
+
+      return {
+        id: item.id,
+        ownerUserId: item.ownerUserId,
+        title: item.title,
+        slug: item.slug,
+        description: item.description,
+        category: this.serializeCategory(item.category),
+        condition: item.condition,
+        subjectiveValue: item.subjectiveValue,
+        exchangePreferences: item.exchangePreferences,
+        publicationStatus: item.publicationStatus,
+        publishedAt: item.publishedAt,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        deletedAt: item.deletedAt,
+        trashExpiresAt: item.trashExpiresAt,
+        activeNegotiationsCount,
+        ownerSummary: options?.ownerSummary
+          ? {
+              userId: options.ownerSummary.userId,
+              displayName: options.ownerSummary.displayName,
+              avatarUrl: options.ownerSummary.avatarUrl,
+              isAvatarVerified: options.ownerSummary.isAvatarVerified,
+              isFollowingByViewer: options.ownerSummary.isFollowingByViewer,
+            }
+          : null,
+        ...(options?.includeOwnerModerationReport
+          ? {
+              ownerModerationReport: item.ownerModerationReport,
+            }
+          : {}),
+        images: await Promise.all(
+          item.images.map(image => this.serializeImage(image))
+        ),
+      }
+    } finally {
+      this.homePerformanceService.addDuration(
+        'serialization',
+        Date.now() - startedAt
+      )
     }
   }
 
@@ -936,59 +2019,29 @@ export class CatalogItemsService {
     publishedAt?: Date | string | null
     createdAt: Date | string
     activeNegotiationsCount?: number
-  }[]) {
+  }[],
+  ownerSummaries?: Map<string, IdentityOwnerSummary>) {
     const uniqueOwnerUserIds = [...new Set(items.map(item => item.ownerUserId))]
 
     if (uniqueOwnerUserIds.length === 0) {
       return new Map<string, CatalogOwnerRankingSignals>()
     }
 
-    const [ownerSignalsList, ownerRatingGroups] = await Promise.all([
-      Promise.all(
-        uniqueOwnerUserIds.map(async ownerUserId => [
-          ownerUserId,
-          await this.identitySignalsService.getSignalsForUser(ownerUserId),
-        ] as const)
-      ),
-      this.prismaService.exchangeMatchFeedback.groupBy({
-        by: ['reviewedUserId'],
-        where: {
-          reviewedUserId: {
-            in: uniqueOwnerUserIds,
-          },
-          wasEffectiveInPerson: true,
-        },
-        _avg: {
-          rating: true,
-        },
-        _count: {
-          _all: true,
-        },
-      }),
-    ])
-
-    const ownerSignalMap = new Map(ownerSignalsList)
-    const ownerRatingsMap = new Map(
-      ownerRatingGroups.map(group => [
-        group.reviewedUserId,
-        {
-          averageRating: group._avg.rating ?? null,
-          ratingCount: group._count._all,
-        },
-      ])
-    )
+    const ownerRatingsMap = await this.getCachedOwnerRatings(uniqueOwnerUserIds)
 
     const rankingSignalsByOwner = new Map<string, CatalogOwnerRankingSignals>()
 
     for (const ownerUserId of uniqueOwnerUserIds) {
-      const ownerSignals = ownerSignalMap.get(ownerUserId)
+      const ownerSummary = ownerSummaries?.get(ownerUserId)
       const ownerRatings = ownerRatingsMap.get(ownerUserId)
       const ownerRepresentativeItem =
         items.find(item => item.ownerUserId === ownerUserId) ?? null
       const score = this.calculateCatalogOwnerRankingScore({
-        ownerIsPremium: Boolean(ownerSignals?.isPremium),
+        ownerIsPremium: Boolean(ownerSummary?.isPremium),
         ownerAverageRating: ownerRatings?.averageRating ?? null,
         ownerRatingCount: ownerRatings?.ratingCount ?? 0,
+        ownerFollowedByViewer:
+          ownerSummary?.isFollowingByViewer ?? false,
         activeNegotiationsCount:
           ownerRepresentativeItem?.activeNegotiationsCount ?? 0,
         publishedAt:
@@ -998,9 +2051,11 @@ export class CatalogItemsService {
       })
 
       rankingSignalsByOwner.set(ownerUserId, {
-        ownerIsPremium: Boolean(ownerSignals?.isPremium),
+        ownerIsPremium: Boolean(ownerSummary?.isPremium),
         ownerAverageRating: ownerRatings?.averageRating ?? null,
         ownerRatingCount: ownerRatings?.ratingCount ?? 0,
+        ownerFollowedByViewer:
+          ownerSummary?.isFollowingByViewer ?? false,
         score,
       })
     }
@@ -1012,15 +2067,20 @@ export class CatalogItemsService {
     publishedAt?: Date | string | null
     createdAt: Date | string
     activeNegotiationsCount: number
+    ownerSummary?: {
+      isFollowingByViewer?: boolean
+    } | null
   }): CatalogOwnerRankingSignals {
     return {
       ownerIsPremium: false,
       ownerAverageRating: null,
       ownerRatingCount: 0,
+      ownerFollowedByViewer: Boolean(item.ownerSummary?.isFollowingByViewer),
       score: this.calculateCatalogOwnerRankingScore({
         ownerIsPremium: false,
         ownerAverageRating: null,
         ownerRatingCount: 0,
+        ownerFollowedByViewer: Boolean(item.ownerSummary?.isFollowingByViewer),
         activeNegotiationsCount: item.activeNegotiationsCount,
         publishedAt: item.publishedAt ?? item.createdAt,
       }),
@@ -1031,12 +2091,14 @@ export class CatalogItemsService {
     ownerIsPremium: boolean
     ownerAverageRating: number | null
     ownerRatingCount: number
+    ownerFollowedByViewer: boolean
     activeNegotiationsCount: number
     publishedAt: Date | string | null
   }) {
     const premiumBoost = input.ownerIsPremium ? 1000 : 0
     const ratingBoost = (input.ownerAverageRating ?? 0) * 100
     const ratingVolumeBoost = Math.min(input.ownerRatingCount, 50) * 4
+    const followingBoost = input.ownerFollowedByViewer ? 180 : 0
     const negotiationBoost = Math.min(input.activeNegotiationsCount, 20) * 3
     const publishedAt = input.publishedAt ? new Date(input.publishedAt) : null
     const itemAgeHours =
@@ -1052,6 +2114,7 @@ export class CatalogItemsService {
       premiumBoost +
         ratingBoost +
         ratingVolumeBoost +
+        followingBoost +
         negotiationBoost +
         freshnessBoost
     )
@@ -1069,19 +2132,82 @@ export class CatalogItemsService {
   }
 
   private async serializeImage(image: CatalogItemImage) {
-    const readableStorageUrl = image.storagePath
-      ? await this.storageService.createCatalogItemImageReadUrl(
-          image.storagePath
+    const startedAt = Date.now()
+    const thumbnailUrl = image.storagePath
+      ? this.storageService.createCatalogItemImageThumbnailUrl(
+          image.storagePath,
         )
-      : image.storageUrl
+      : null
+    let readableStorageUrl = image.storageUrl
+
+    if (image.storagePath) {
+      try {
+        readableStorageUrl = await this.withTimeout(
+          'mediaUrls',
+          this.getHomeTimeoutMs('mediaTimeoutMs'),
+          this.getCachedCatalogImageReadUrl(image.storagePath)
+        )
+      } catch (error) {
+        this.homePerformanceService.recordMedia({
+          fallbacks: 1,
+          errors: 1,
+        })
+        this.homePerformanceService.addDegraded(
+          'mediaUrls',
+          'signed_url_failed'
+        )
+        this.homePerformanceService.addFallback(
+          'mediaUrls',
+          'thumbnail_or_existing_storage_url'
+        )
+        this.logger.warn({
+          event: 'catalog.home.degraded_component',
+          component: 'mediaUrls',
+          reason: 'signed_url_failed',
+          err: error,
+          imageId: image.id,
+        })
+        readableStorageUrl = thumbnailUrl ?? image.storageUrl
+      } finally {
+        this.homePerformanceService.addDuration(
+          'mediaUrls',
+          Date.now() - startedAt
+        )
+      }
+    }
 
     return {
       id: image.id,
       storageUrl: readableStorageUrl,
+      thumbnailUrl,
       storagePath: image.storagePath,
       sortOrder: image.sortOrder,
       isCover: image.isCover,
       createdAt: image.createdAt,
     }
+  }
+
+  private async getCachedCatalogImageReadUrl(storagePath: string) {
+    const cacheKey = `catalog:media-read-url:${this.hashJson(storagePath)}`
+    this.homePerformanceService.recordMedia({ urlsRequested: 1 })
+    const cachedUrl = await this.getCachedJson<string>(cacheKey)
+
+    if (cachedUrl) {
+      this.homePerformanceService.recordMedia({ cacheHits: 1 })
+      return cachedUrl
+    }
+
+    const readableStorageUrl = await this.circuitBreakerService.execute(
+      'media-signing',
+      () => this.storageService.createCatalogItemImageReadUrl(storagePath)
+    )
+    this.homePerformanceService.recordMedia({ generated: 1 })
+    await this.setCachedJson(
+      cacheKey,
+      readableStorageUrl,
+      MEDIA_READ_URL_CACHE_TTL_SECONDS
+    )
+
+    return readableStorageUrl
   }
 }

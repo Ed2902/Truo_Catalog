@@ -2,14 +2,30 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { AuthenticatedRequestUser } from '../../auth/interfaces/authenticated-request.interface';
+import { HomePerformanceService } from '../../common/observability/home-performance.service';
+import { CircuitBreakerService } from '../../common/resilience/circuit-breaker.service';
 import { CatalogActor } from '../interfaces/catalog-actor.interface';
 import { IdentityUserSignals } from '../interfaces/identity-signals.interface';
+
+export type IdentityOwnerSummary = {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  isAvatarVerified: boolean;
+  isPremium: boolean;
+  isFollowingByViewer: boolean;
+  isRestricted: boolean;
+};
 
 @Injectable()
 export class IdentitySignalsService {
   private readonly logger = new Logger(IdentitySignalsService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly homePerformanceService: HomePerformanceService,
+    private readonly circuitBreakerService: CircuitBreakerService,
+  ) {}
 
   async getSignalsForUser(
     userId: string,
@@ -87,6 +103,111 @@ export class IdentitySignalsService {
       userId: authUser.userId,
       isPremium: false,
     };
+  }
+
+  async getOwnerSummaries(userIds: string[], actor?: CatalogActor) {
+    const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+
+    if (!uniqueUserIds.length) {
+      return {
+        summaries: new Map<string, IdentityOwnerSummary>(),
+        hiddenUserIds: new Set<string>(),
+        degraded: false,
+      };
+    }
+
+    const baseUrl = this.configService.get<string | undefined>('identity.baseUrl');
+    const internalToken = this.configService.get<string | undefined>(
+      'identity.internalToken',
+    );
+    const timeoutMs =
+      this.configService.get<number | undefined>(
+        'homePerformance.identityTimeoutMs',
+      ) ??
+      this.configService.get<number | undefined>('identity.signalsTimeoutMs') ??
+      800;
+
+    if (!baseUrl) {
+      return {
+        summaries: new Map<string, IdentityOwnerSummary>(),
+        hiddenUserIds: new Set<string>(),
+        degraded: true,
+      };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await this.circuitBreakerService.execute(
+        'identity-api',
+        () =>
+          fetch(
+            `${baseUrl.replace(/\/$/, '')}/api/internal/users/owner-summaries`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(internalToken ? { 'x-internal-token': internalToken } : {}),
+              },
+              body: JSON.stringify({
+                userIds: uniqueUserIds,
+                viewerUserId: actor?.userId ?? null,
+              }),
+              signal: controller.signal,
+            },
+          ),
+      );
+
+      if (!response.ok) {
+        throw new Error(`Identity returned HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        summaries?: IdentityOwnerSummary[];
+        hiddenUserIds?: string[];
+      };
+
+      return {
+        summaries: new Map(
+          (payload.summaries ?? []).map((summary) => [summary.userId, summary]),
+        ),
+        hiddenUserIds: new Set(payload.hiddenUserIds ?? []),
+        degraded: false,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        this.homePerformanceService.addTimeout(
+          'identityOwnerSummaries',
+          timeoutMs,
+        );
+        this.logger.warn({
+          event: 'catalog.home.component_timeout',
+          component: 'identityOwnerSummaries',
+          timeoutMs,
+        });
+      }
+      this.homePerformanceService.addDegraded(
+        'identityOwnerSummaries',
+        'identity_lookup_failed',
+      );
+      this.logger.warn(
+        {
+          err: error,
+          userIds: uniqueUserIds,
+          viewerUserId: actor?.userId,
+        },
+        'Unable to load owner summaries from identity',
+      );
+
+      return {
+        summaries: new Map<string, IdentityOwnerSummary>(),
+        hiddenUserIds: new Set<string>(),
+        degraded: true,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private tryReadSignalsFromHeaderCache(

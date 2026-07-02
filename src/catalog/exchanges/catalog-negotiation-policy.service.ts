@@ -274,6 +274,130 @@ export class CatalogNegotiationPolicyService {
     )
   }
 
+  async countActiveNegotiationsForItems(itemIds: string[]) {
+    const uniqueItemIds = [...new Set(itemIds.filter(Boolean))]
+    const countsByItemId = new Map<string, number>(
+      uniqueItemIds.map(itemId => [itemId, 0])
+    )
+
+    if (!uniqueItemIds.length) {
+      return countsByItemId
+    }
+
+    const [
+      pendingRequestedProposals,
+      pendingOfferedProposals,
+      acceptedRequestedWithoutMatch,
+      acceptedOfferedWithoutMatch,
+      activeRequestedMatches,
+      activeOfferedMatches,
+    ] = await Promise.all([
+      this.prismaService.exchangeProposal.groupBy({
+        by: ['requestedItemId'],
+        where: {
+          requestedItemId: {
+            in: uniqueItemIds,
+          },
+          status: {
+            in: [...ACTIVE_NEGOTIATION_PROPOSAL_STATUSES] as never,
+          },
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+      this.prismaService.exchangeProposal.groupBy({
+        by: ['offeredItemId'],
+        where: {
+          offeredItemId: {
+            in: uniqueItemIds,
+          },
+          status: {
+            in: [...ACTIVE_NEGOTIATION_PROPOSAL_STATUSES] as never,
+          },
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+      this.prismaService.exchangeProposal.groupBy({
+        by: ['requestedItemId'],
+        where: {
+          requestedItemId: {
+            in: uniqueItemIds,
+          },
+          status: ExchangeProposalStatus.ACCEPTED as never,
+          match: null,
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+      this.prismaService.exchangeProposal.groupBy({
+        by: ['offeredItemId'],
+        where: {
+          offeredItemId: {
+            in: uniqueItemIds,
+          },
+          status: ExchangeProposalStatus.ACCEPTED as never,
+          match: null,
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+      this.prismaService.exchangeMatch.groupBy({
+        by: ['requestedItemId'],
+        where: {
+          requestedItemId: {
+            in: uniqueItemIds,
+          },
+          status: {
+            in: [...ACTIVE_NEGOTIATION_MATCH_STATUSES] as never,
+          },
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+      this.prismaService.exchangeMatch.groupBy({
+        by: ['offeredItemId'],
+        where: {
+          offeredItemId: {
+            in: uniqueItemIds,
+          },
+          status: {
+            in: [...ACTIVE_NEGOTIATION_MATCH_STATUSES] as never,
+          },
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+    ])
+
+    const addGroupCounts = <T extends string>(
+      groups: Array<Record<T, string> & { _count: { _all: number } }>,
+      field: T
+    ) => {
+      for (const group of groups) {
+        countsByItemId.set(
+          group[field],
+          (countsByItemId.get(group[field]) ?? 0) + group._count._all
+        )
+      }
+    }
+
+    addGroupCounts(pendingRequestedProposals, 'requestedItemId')
+    addGroupCounts(pendingOfferedProposals, 'offeredItemId')
+    addGroupCounts(acceptedRequestedWithoutMatch, 'requestedItemId')
+    addGroupCounts(acceptedOfferedWithoutMatch, 'offeredItemId')
+    addGroupCounts(activeRequestedMatches, 'requestedItemId')
+    addGroupCounts(activeOfferedMatches, 'offeredItemId')
+
+    return countsByItemId
+  }
+
   countActiveProposalsForItem(itemId: string) {
     return this.prismaService.exchangeProposal.count({
       where: {

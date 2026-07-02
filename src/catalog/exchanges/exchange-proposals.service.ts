@@ -11,6 +11,7 @@ import { NotificationsApiService } from '../../common/notifications-api.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { sanitizePlainText } from '../../common/utils/sanitize-text.util'
 import { CatalogItemsService } from '../items/catalog-items.service'
+import { CatalogOutboxService } from '../outbox/catalog-outbox.service'
 import { ChatApiService } from './chat-api.service'
 import { CatalogNegotiationPolicyService } from './catalog-negotiation-policy.service'
 import {
@@ -52,6 +53,7 @@ export class ExchangeProposalsService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly itemsService: CatalogItemsService,
+    private readonly catalogOutboxService: CatalogOutboxService,
     private readonly negotiationPolicyService: CatalogNegotiationPolicyService,
     private readonly chatApiService: ChatApiService,
     private readonly notificationsApiService: NotificationsApiService,
@@ -147,6 +149,10 @@ export class ExchangeProposalsService {
       }
 
       return createdProposal
+    })
+
+    await this.catalogOutboxService.emitProposalChanged({
+      itemIds: [proposal.offeredItemId, proposal.requestedItemId],
     })
 
     return this.serializeProposal(proposal)

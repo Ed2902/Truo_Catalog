@@ -15,6 +15,7 @@ import {
   CatalogTextModerationService,
 } from './catalog-text-moderation.service';
 import {
+  CATALOG_PUBLICATION_MODERATION_MAX_ATTEMPTS,
   CATALOG_IMAGE_MODERATION_JOB,
   CATALOG_TEXT_MODERATION_JOB,
 } from './catalog-publication-moderation.constants';
@@ -132,6 +133,7 @@ export class CatalogPublicationModerationService {
         },
         {
           jobId: `${CATALOG_TEXT_MODERATION_JOB}:${itemId}:${version}`,
+          attempts: CATALOG_PUBLICATION_MODERATION_MAX_ATTEMPTS,
         },
       );
     }
@@ -152,6 +154,7 @@ export class CatalogPublicationModerationService {
         },
         {
           jobId: `${CATALOG_IMAGE_MODERATION_JOB}:${image.id}:${version}`,
+          attempts: CATALOG_PUBLICATION_MODERATION_MAX_ATTEMPTS,
         },
       );
     }

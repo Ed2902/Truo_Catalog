@@ -18,6 +18,9 @@ import { ExchangeMatchesService } from './exchanges/exchange-matches.service'
 import { ExchangeProposalsController } from './exchanges/exchange-proposals.controller'
 import { ExchangeProposalsService } from './exchanges/exchange-proposals.service'
 import { IdentitySignalsService } from './identity/identity-signals.service'
+import { CatalogHomeController } from './home/catalog-home.controller'
+import { CatalogHomeService } from './home/catalog-home.service'
+import { CatalogInternalCacheEventsController } from './internal/catalog-internal-cache-events.controller'
 import { CatalogDuplicatePolicyService } from './items/catalog-duplicate-policy.service'
 import { CatalogItemImagesController } from './items/catalog-item-images.controller'
 import { CatalogItemImagesService } from './items/catalog-item-images.service'
@@ -28,12 +31,16 @@ import { CatalogModerationController } from './moderation/catalog-moderation.con
 import { CatalogPublicationModerationProcessor } from './moderation/catalog-publication-moderation.processor'
 import { CatalogPublicationModerationService } from './moderation/catalog-publication-moderation.service'
 import { CatalogTextModerationService } from './moderation/catalog-text-moderation.service'
+import { CatalogOutboxProcessor } from './outbox/catalog-outbox.processor'
+import { CatalogOutboxService } from './outbox/catalog-outbox.service'
 
 @Module({
   imports: [AuthModule, CommonModule, StorageModule, QueueModule],
   controllers: [
     CatalogAdminController,
     CatalogCategoriesController,
+    CatalogHomeController,
+    CatalogInternalCacheEventsController,
     CatalogItemImagesController,
     CatalogModerationController,
     CatalogItemsController,
@@ -47,9 +54,12 @@ import { CatalogTextModerationService } from './moderation/catalog-text-moderati
     CatalogTextModerationService,
     CatalogPublicationModerationService,
     CatalogPublicationModerationProcessor,
+    CatalogOutboxService,
+    CatalogOutboxProcessor,
     CatalogAdminExchangesService,
     CatalogAdminQueueService,
     CatalogAdminMetricsService,
+    CatalogHomeService,
     CatalogItemImagesService,
     CatalogDuplicatePolicyService,
     CatalogItemsService,

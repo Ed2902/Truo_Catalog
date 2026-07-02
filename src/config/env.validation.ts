@@ -32,10 +32,28 @@ export const envValidationSchema = Joi.object({
   STORAGE_S3_PUBLIC_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .required(),
+  STORAGE_MEDIA_CDN_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .allow('')
+    .optional(),
   STORAGE_MAX_UPLOAD_SIZE: Joi.number().positive().required(),
   DATABASE_URL: Joi.string().trim().required(),
-  REDIS_URL: Joi.string().trim().required(),
+  REDIS_URL: Joi.string().trim().allow('').optional(),
+  REDIS_CACHE_URL: Joi.string().trim().required(),
+  REDIS_QUEUE_URL: Joi.string().trim().required(),
+  REDIS_REALTIME_URL: Joi.string().trim().allow('').optional(),
+  REDIS_CACHE_MAX_MEMORY: Joi.string().trim().allow('').optional(),
+  REDIS_CACHE_EVICTION_POLICY: Joi.string().trim().allow('').optional(),
+  REDIS_QUEUE_PERSISTENCE_MODE: Joi.string().trim().allow('').optional(),
+  REDIS_REALTIME_ENABLED: Joi.boolean().optional(),
+  CATALOG_INTERNAL_TOKEN: Joi.string()
+    .allow('')
+    .optional(),
   QUEUE_PREFIX: Joi.string().trim().required(),
+  REDIS_QUEUE_MAX_RETRIES: Joi.number().integer().min(1).max(20).optional(),
+  REDIS_QUEUE_BACKOFF_MS: Joi.number().positive().optional(),
+  REDIS_QUEUE_REMOVE_ON_COMPLETE: Joi.number().integer().min(0).optional(),
+  REDIS_QUEUE_REMOVE_ON_FAIL: Joi.number().integer().min(0).optional(),
   IDENTITY_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .allow('')
@@ -62,6 +80,11 @@ export const envValidationSchema = Joi.object({
     .allow('')
     .optional(),
   CHAT_API_TIMEOUT_MS: Joi.number().positive().optional(),
+  STORIES_API_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .allow('')
+    .optional(),
+  STORIES_API_TIMEOUT_MS: Joi.number().positive().optional(),
   NOTIFICATIONS_API_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .allow('')
@@ -70,6 +93,20 @@ export const envValidationSchema = Joi.object({
     .allow('')
     .optional(),
   NOTIFICATIONS_API_TIMEOUT_MS: Joi.number().positive().optional(),
+  HOME_PERFORMANCE_BUDGET_WARN_MS: Joi.number().positive().optional(),
+  HOME_PERFORMANCE_BUDGET_CRITICAL_MS: Joi.number().positive().optional(),
+  HOME_IDENTITY_TIMEOUT_MS: Joi.number().positive().optional(),
+  HOME_STORIES_TIMEOUT_MS: Joi.number().positive().optional(),
+  HOME_RATINGS_TIMEOUT_MS: Joi.number().positive().optional(),
+  HOME_MEDIA_TIMEOUT_MS: Joi.number().positive().optional(),
+  HOME_REDIS_TIMEOUT_MS: Joi.number().positive().optional(),
+  HOME_SERIALIZATION_CONCURRENCY: Joi.number().integer().min(1).max(50).optional(),
+  HOME_CIRCUIT_BREAKER_FAILURE_THRESHOLD: Joi.number()
+    .integer()
+    .min(1)
+    .max(100)
+    .optional(),
+  HOME_CIRCUIT_BREAKER_OPEN_MS: Joi.number().positive().optional(),
   MODERATION_INTERNAL_TOKEN: Joi.string()
     .allow('')
     .optional(),
@@ -81,4 +118,10 @@ export const envValidationSchema = Joi.object({
   RATE_LIMIT_LIMIT: Joi.number().positive().required(),
   SENSITIVE_RATE_LIMIT_TTL: Joi.number().positive().required(),
   SENSITIVE_RATE_LIMIT_LIMIT: Joi.number().positive().required(),
+  HOME_RATE_LIMIT_TTL: Joi.number().positive().optional(),
+  HOME_RATE_LIMIT_LIMIT: Joi.number().positive().optional(),
+  DETAIL_RATE_LIMIT_TTL: Joi.number().positive().optional(),
+  DETAIL_RATE_LIMIT_LIMIT: Joi.number().positive().optional(),
+  MEDIA_UPLOAD_RATE_LIMIT_TTL: Joi.number().positive().optional(),
+  MEDIA_UPLOAD_RATE_LIMIT_LIMIT: Joi.number().positive().optional(),
 });

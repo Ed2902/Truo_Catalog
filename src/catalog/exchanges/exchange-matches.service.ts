@@ -373,6 +373,8 @@ export class ExchangeMatchesService implements OnModuleInit, OnModuleDestroy {
       },
     })
 
+    await this.itemsService.invalidateOwnerRankingCaches(reviewedUserId)
+
     const refreshedMatch = await this.getMatchOrThrow(match.id)
     return this.serializeMatch(refreshedMatch, actor.userId)
   }

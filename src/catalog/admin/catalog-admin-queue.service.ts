@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { QueueService } from '../../queue/queue.service'
 import { AdminQueueQueryDto } from '../dto/admin-queue-query.dto'
 
@@ -61,6 +61,13 @@ export class CatalogAdminQueueService {
 
     if (!job) {
       throw new NotFoundException('Queue job not found')
+    }
+
+    const maxAttempts =
+      typeof job.opts.attempts === 'number' ? job.opts.attempts : 1
+
+    if (job.attemptsMade >= maxAttempts) {
+      throw new BadRequestException('Queue job exhausted its retry limit')
     }
 
     await job.retry('failed')
