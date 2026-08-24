@@ -17,4 +17,11 @@ export class ListModerationAppealsQueryDto {
   @Min(1)
   @Max(100)
   take?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(5000)
+  skip?: number
 }

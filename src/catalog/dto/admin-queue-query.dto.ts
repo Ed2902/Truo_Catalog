@@ -7,6 +7,10 @@ export class AdminQueueQueryDto {
   state?: string
 
   @IsOptional()
+  @IsString()
+  queueKey?: string
+
+  @IsOptional()
   @Transform(({ value }) => Number(value))
   @IsInt()
   @Min(1)

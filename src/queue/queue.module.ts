@@ -2,7 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { QueueService } from './queue.service';
-import { SYSTEM_QUEUE } from './queue.constants';
+import { PUBLICATION_MODERATION_QUEUE, SYSTEM_QUEUE } from './queue.constants';
 
 @Global()
 @Module({
@@ -33,6 +33,9 @@ import { SYSTEM_QUEUE } from './queue.constants';
     }),
     BullModule.registerQueue({
       name: SYSTEM_QUEUE,
+    }),
+    BullModule.registerQueue({
+      name: PUBLICATION_MODERATION_QUEUE,
     }),
   ],
   providers: [QueueService],

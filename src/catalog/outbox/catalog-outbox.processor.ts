@@ -1,5 +1,5 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { SYSTEM_QUEUE } from '../../queue/queue.constants';
 import { CATALOG_OUTBOX_DISPATCH_JOB } from './catalog-outbox.constants';
 import { CatalogOutboxService } from './catalog-outbox.service';
@@ -12,7 +12,7 @@ export class CatalogOutboxProcessor extends WorkerHost {
 
   async process(job: Job) {
     if (job.name !== CATALOG_OUTBOX_DISPATCH_JOB) {
-      return;
+      throw new UnrecoverableError(`Unsupported outbox job: ${job.name}`);
     }
 
     const eventId =

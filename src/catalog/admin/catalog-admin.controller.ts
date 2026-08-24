@@ -26,10 +26,10 @@ import { AddExchangeDisputeMessageDto } from '../dto/add-exchange-dispute-messag
 import { AdminQueueQueryDto } from '../dto/admin-queue-query.dto'
 import { DeleteAdminCatalogItemDto } from '../dto/delete-admin-catalog-item.dto'
 import { ListAdminExchangesQueryDto } from '../dto/list-admin-exchanges-query.dto'
+import { ListAdminCatalogItemsQueryDto } from '../dto/list-admin-catalog-items-query.dto'
 import { ListAdminCatalogMetricsQueryDto } from '../dto/list-admin-catalog-metrics-query.dto'
 import { ListAdminProductModerationQueryDto } from '../dto/list-admin-product-moderation-query.dto'
 import { ListCatalogItemReportsQueryDto } from '../dto/list-catalog-item-reports-query.dto'
-import { ListCatalogItemsQueryDto } from '../dto/list-catalog-items-query.dto'
 import { ListExchangeDisputesQueryDto } from '../dto/list-exchange-disputes-query.dto'
 import { ListModerationAppealsQueryDto } from '../dto/list-moderation-appeals-query.dto'
 import { ResolveCatalogItemReportDto } from '../dto/resolve-catalog-item-report.dto'
@@ -54,7 +54,7 @@ export class CatalogAdminController {
 
   @Get('products')
   @RequireAdminPermissions('catalog.products.read')
-  listProducts(@Query() query: ListCatalogItemsQueryDto) {
+  listProducts(@Query() query: ListAdminCatalogItemsQueryDto) {
     return this.catalogItemsService.listAdminItems(query)
   }
 
@@ -72,20 +72,26 @@ export class CatalogAdminController {
 
   @Post('workers/queue/pause')
   @RequireAdminPermissions('workers.manage')
-  pauseWorkerQueue() {
-    return this.catalogAdminQueueService.pause()
+  pauseWorkerQueue(@Query() query: AdminQueueQueryDto) {
+    return this.catalogAdminQueueService.pause(query.queueKey)
   }
 
   @Post('workers/queue/resume')
   @RequireAdminPermissions('workers.manage')
-  resumeWorkerQueue() {
-    return this.catalogAdminQueueService.resume()
+  resumeWorkerQueue(@Query() query: AdminQueueQueryDto) {
+    return this.catalogAdminQueueService.resume(query.queueKey)
   }
 
   @Post('workers/queue/jobs/:jobId/retry')
   @RequireAdminPermissions('workers.manage')
-  retryWorkerJob(@Param('jobId') jobId: string) {
-    return this.catalogAdminQueueService.retry(jobId)
+  retryWorkerJob(@Param('jobId') jobId: string, @Query() query: AdminQueueQueryDto) {
+    return this.catalogAdminQueueService.retry(jobId, query.queueKey)
+  }
+
+  @Delete('workers/queue/jobs/:jobId')
+  @RequireAdminPermissions('workers.manage')
+  removeWorkerJob(@Param('jobId') jobId: string, @Query() query: AdminQueueQueryDto) {
+    return this.catalogAdminQueueService.remove(jobId, query.queueKey)
   }
 
   @Post('workers/catalog-items/:itemId/retry-moderation')

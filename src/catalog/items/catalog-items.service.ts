@@ -7,7 +7,12 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createHash, randomUUID } from 'crypto'
-import { CatalogCategory, CatalogItemImage, Prisma } from '@prisma/client'
+import {
+  CatalogCategory,
+  CatalogImageModerationStatus,
+  CatalogItemImage,
+  Prisma,
+} from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { StorageService } from '../../storage/storage.service'
@@ -25,6 +30,7 @@ import {
 import { CatalogPublicationModerationService } from '../moderation/catalog-publication-moderation.service'
 import { CatalogOutboxService } from '../outbox/catalog-outbox.service'
 import { CreateCatalogItemDto } from '../dto/create-catalog-item.dto'
+import { ListAdminCatalogItemsQueryDto } from '../dto/list-admin-catalog-items-query.dto'
 import { ListCatalogItemsQueryDto } from '../dto/list-catalog-items-query.dto'
 import { UpdateCatalogItemDto } from '../dto/update-catalog-item.dto'
 import { CatalogActor } from '../interfaces/catalog-actor.interface'
@@ -473,7 +479,7 @@ export class CatalogItemsService {
     )
   }
 
-  async listAdminItems(query: ListCatalogItemsQueryDto) {
+  async listAdminItems(query: ListAdminCatalogItemsQueryDto) {
     const items = await this.prismaService.catalogItem.findMany({
       where: {
         deletedAt: null,
@@ -486,6 +492,7 @@ export class CatalogItemsService {
       },
       include: itemDetailInclude,
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      skip: query.skip ?? 0,
       take: query.take ?? 100,
     })
 
@@ -1570,6 +1577,61 @@ export class CatalogItemsService {
     const shouldPublishNow =
       publicationStatus === CatalogItemPublicationStatus.ACTIVE &&
       !existingItem.publishedAt
+    const manualReviewNotes =
+      publicationStatus === CatalogItemPublicationStatus.ACTIVE
+        ? 'Aprobacion manual desde admin.'
+        : publicationStatus === CatalogItemPublicationStatus.BLOCKED
+          ? 'Bloqueo manual desde admin.'
+          : null
+
+    if (publicationStatus === CatalogItemPublicationStatus.ACTIVE) {
+      await this.prismaService.catalogItemImageModeration.updateMany({
+        where: {
+          catalogItemId: itemId,
+          status: {
+            in: [
+              CatalogImageModerationStatus.PENDING,
+              CatalogImageModerationStatus.NEEDS_REVIEW,
+              CatalogImageModerationStatus.ERROR,
+              CatalogImageModerationStatus.BLOCKED,
+            ],
+          },
+        },
+        data: {
+          status: CatalogImageModerationStatus.APPROVED,
+          reviewedAt: new Date(),
+          reviewNotes: manualReviewNotes,
+        },
+      })
+
+      await this.catalogPublicationModerationService.clearPublicationReviewState(
+        itemId,
+      )
+    }
+
+    if (publicationStatus === CatalogItemPublicationStatus.BLOCKED) {
+      await this.prismaService.catalogItemImageModeration.updateMany({
+        where: {
+          catalogItemId: itemId,
+          status: {
+            in: [
+              CatalogImageModerationStatus.PENDING,
+              CatalogImageModerationStatus.NEEDS_REVIEW,
+              CatalogImageModerationStatus.ERROR,
+            ],
+          },
+        },
+        data: {
+          status: CatalogImageModerationStatus.BLOCKED,
+          reviewedAt: new Date(),
+          reviewNotes: manualReviewNotes,
+        },
+      })
+
+      await this.catalogPublicationModerationService.clearPublicationReviewState(
+        itemId,
+      )
+    }
 
     const item = await this.prismaService.catalogItem.update({
       where: {
@@ -1577,10 +1639,19 @@ export class CatalogItemsService {
       },
       data: {
         publicationStatus: publicationStatus as never,
+        ...(publicationStatus === CatalogItemPublicationStatus.ACTIVE
+          ? { ownerModerationReport: Prisma.JsonNull }
+          : {}),
         ...(shouldPublishNow ? { publishedAt: new Date() } : {}),
       },
       include: itemDetailInclude,
     })
+
+    await this.catalogPublicationModerationService.emitOwnerNotification(
+      existingItem,
+      item,
+      publicationStatus,
+    )
 
     await this.invalidateItemFeedCaches(item.id, item.ownerUserId)
 

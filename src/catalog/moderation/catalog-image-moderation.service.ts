@@ -141,6 +141,7 @@ export class CatalogImageModerationService {
     catalogItemId: string
     catalogItemImageId?: string
     imageUrl: string
+    skipItemStatusUpdate?: boolean
   }) {
     const jobId = `image-analysis_${randomUUID()}`
     const moderation = await this.prismaService.catalogItemImageModeration.create({
@@ -158,7 +159,11 @@ export class CatalogImageModerationService {
         imageUrl: input.imageUrl,
       })
 
-      return this.persistAnalyzerResult(moderation.id, result)
+      return this.persistAnalyzerResult(
+        moderation.id,
+        result,
+        input.skipItemStatusUpdate ?? false,
+      )
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'image_analysis_failed'
@@ -176,10 +181,12 @@ export class CatalogImageModerationService {
           include: moderationDetailInclude,
         })
 
-      await this.applyItemStatusForModeration(
-        input.catalogItemId,
-        CatalogImageModerationStatus.ERROR,
-      )
+      if (!input.skipItemStatusUpdate) {
+        await this.applyItemStatusForModeration(
+          input.catalogItemId,
+          CatalogImageModerationStatus.ERROR,
+        )
+      }
 
       return this.serializeModeration(storedModeration)
     }
@@ -284,6 +291,7 @@ export class CatalogImageModerationService {
       },
       include: adminProductQueueInclude,
       orderBy: [{ updatedAt: 'desc' }],
+      skip: query.skip ?? 0,
       take: query.take ?? 75,
     })
 
@@ -451,6 +459,7 @@ export class CatalogImageModerationService {
       },
       include: appealDetailInclude,
       orderBy: [{ createdAt: 'asc' }],
+      skip: query.skip ?? 0,
       take: query.take ?? 50,
     })
 
@@ -541,6 +550,7 @@ export class CatalogImageModerationService {
       },
       include: reportDetailInclude,
       orderBy: [{ createdAt: 'asc' }],
+      skip: query.skip ?? 0,
       take: query.take ?? 50,
     })
 
@@ -740,6 +750,7 @@ export class CatalogImageModerationService {
   private async persistAnalyzerResult(
     moderationId: string,
     result: ImageAnalyzerResponse,
+    skipItemStatusUpdate = false,
   ) {
     const status = this.resolveModerationStatus(result.recommendedAction)
     const moderation =
@@ -762,10 +773,12 @@ export class CatalogImageModerationService {
         include: moderationDetailInclude,
       })
 
-    await this.applyItemStatusForModeration(
-      moderation.catalogItemId,
-      status,
-    )
+    if (!skipItemStatusUpdate) {
+      await this.applyItemStatusForModeration(
+        moderation.catalogItemId,
+        status,
+      )
+    }
 
     return this.serializeModeration(moderation)
   }

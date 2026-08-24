@@ -1,14 +1,14 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job, UnrecoverableError } from 'bullmq';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { SYSTEM_QUEUE } from '../../queue/queue.constants';
+import { PUBLICATION_MODERATION_QUEUE } from '../../queue/queue.constants';
 import {
   CATALOG_IMAGE_MODERATION_JOB,
   CATALOG_TEXT_MODERATION_JOB,
 } from './catalog-publication-moderation.constants';
 import { CatalogPublicationModerationService } from './catalog-publication-moderation.service';
 
-@Processor(SYSTEM_QUEUE)
+@Processor(PUBLICATION_MODERATION_QUEUE)
 export class CatalogPublicationModerationProcessor extends WorkerHost {
   constructor(
     private readonly catalogPublicationModerationService: CatalogPublicationModerationService,
@@ -47,7 +47,9 @@ export class CatalogPublicationModerationProcessor extends WorkerHost {
             jobContext,
           );
         default:
-          return;
+          throw new UnrecoverableError(
+            `Unsupported publication moderation job: ${job.name}`,
+          );
       }
     } catch (error) {
       if (

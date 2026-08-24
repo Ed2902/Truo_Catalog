@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   CatalogImageModerationStatus,
   CatalogItemPublicationStatus,
@@ -39,6 +39,37 @@ type PublicationModerationState = {
   errorImages: number;
 };
 
+const HARD_BLOCK_IMAGE_FLAGS = new Set([
+  'NSFW',
+  'NUDITY',
+  'SEXUAL_CONTENT',
+  'FIREARM',
+  'AMMO',
+  'DRUGS',
+  'TOBACCO',
+  'VAPE',
+  'ANIMAL',
+]);
+
+const HARD_BLOCK_TEXT_FLAGS = new Set([
+  'PHONE_NUMBER',
+  'WHATSAPP_NUMBER',
+  'EMAIL',
+  'URL',
+  'SOCIAL_MEDIA_HANDLE',
+  'OBFUSCATED_PHONE_NUMBER',
+  'SPELLED_PHONE_NUMBER',
+  'DRUGS',
+  'WEAPON',
+  'FIREARM',
+  'AMMO',
+  'TOBACCO',
+  'VAPE',
+  'NSFW',
+  'SEXUAL_CONTENT',
+  'SEXUAL_SERVICE',
+]);
+
 type OwnerModerationReport = {
   state: 'UNDER_REVIEW' | 'BLOCKED';
   title: string;
@@ -46,6 +77,7 @@ type OwnerModerationReport = {
   reasons: string[];
   details: {
     textStatus: string;
+    pendingImages: number;
     blockedImages: number;
     reviewImages: number;
     errorImages: number;
@@ -55,6 +87,10 @@ type OwnerModerationReport = {
 
 @Injectable()
 export class CatalogPublicationModerationService {
+  private readonly logger = new Logger(
+    CatalogPublicationModerationService.name,
+  );
+
   constructor(
     private readonly prismaService: PrismaService,
     private readonly queueService: QueueService,
@@ -80,14 +116,21 @@ export class CatalogPublicationModerationService {
 
     const version = randomUUID();
     const text = this.buildModerationText(item);
-    const client = await this.queueService.getSystemQueue().client;
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
     const stateKey = this.buildStateKey(itemId);
     const pendingReport = this.buildPendingOwnerModerationReport();
 
     await client.del(stateKey);
+    const initialTextStatus = text
+      ? item.images.length > 0
+        ? 'WAITING_IMAGES'
+        : 'QUEUED'
+      : 'APPROVED';
+
     await client.hset(stateKey, {
       version,
-      textStatus: text ? 'QUEUED' : 'APPROVED',
+      textStatus: initialTextStatus,
       textFlags: '[]',
       textRiskLevel: '',
       textRecommendedAction: '',
@@ -120,22 +163,15 @@ export class CatalogPublicationModerationService {
       sourceEvent: 'catalog.publication_review_queued',
     });
 
-    const queue = this.queueService.getSystemQueue();
+    const queue = this.queueService.getPublicationModerationQueue();
 
-    if (text) {
-      await queue.add(
-        CATALOG_TEXT_MODERATION_JOB,
-        {
-          itemId,
-          userId: item.ownerUserId,
-          text,
-          version,
-        },
-        {
-          jobId: `${CATALOG_TEXT_MODERATION_JOB}:${itemId}:${version}`,
-          attempts: CATALOG_PUBLICATION_MODERATION_MAX_ATTEMPTS,
-        },
-      );
+    if (text && item.images.length === 0) {
+      await this.queueTextModerationJob({
+        itemId,
+        userId: item.ownerUserId,
+        text,
+        version,
+      });
     }
 
     for (const image of item.images) {
@@ -170,6 +206,12 @@ export class CatalogPublicationModerationService {
     };
   }
 
+  async clearPublicationReviewState(itemId: string) {
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
+    await client.del(this.buildStateKey(itemId));
+  }
+
   async processQueuedTextModeration(
     payload: {
       itemId: string;
@@ -181,7 +223,24 @@ export class CatalogPublicationModerationService {
   ) {
     const state = await this.getState(payload.itemId);
 
-    if (!state || state.version !== payload.version) {
+    if (!state) {
+      this.logger.warn({
+        event: 'catalog.publication.text_review_skipped',
+        itemId: payload.itemId,
+        version: payload.version,
+        reason: 'state_missing',
+      });
+      return;
+    }
+
+    if (state.version !== payload.version) {
+      this.logger.warn({
+        event: 'catalog.publication.text_review_skipped',
+        itemId: payload.itemId,
+        version: payload.version,
+        currentVersion: state.version,
+        reason: 'version_mismatch',
+      });
       return;
     }
 
@@ -214,11 +273,38 @@ export class CatalogPublicationModerationService {
   ) {
     const state = await this.getState(payload.itemId);
 
-    if (!state || state.version !== payload.version) {
+    if (!state) {
+      this.logger.warn({
+        event: 'catalog.publication.image_review_skipped',
+        itemId: payload.itemId,
+        imageId: payload.imageId,
+        version: payload.version,
+        reason: 'state_missing',
+      });
+      return;
+    }
+
+    if (state.version !== payload.version) {
+      this.logger.warn({
+        event: 'catalog.publication.image_review_skipped',
+        itemId: payload.itemId,
+        imageId: payload.imageId,
+        version: payload.version,
+        currentVersion: state.version,
+        reason: 'version_mismatch',
+      });
       return;
     }
 
     try {
+      this.logger.log({
+        event: 'catalog.publication.image_review_started',
+        itemId: payload.itemId,
+        imageId: payload.imageId,
+        storageKey: payload.storageKey,
+        version: payload.version,
+      });
+
       const imageUrl =
         await this.storageService.createCatalogItemImageReadUrl(
           payload.storageKey,
@@ -229,16 +315,39 @@ export class CatalogPublicationModerationService {
           catalogItemId: payload.itemId,
           catalogItemImageId: payload.imageId,
           imageUrl,
+          skipItemStatusUpdate: true,
         });
+
+      const publicationImageStatus = this.resolvePublicationImageStatus(
+        moderation.status ?? CatalogImageModerationStatus.ERROR,
+        moderation.flags ?? [],
+      );
+
+      this.logger.log({
+        event: 'catalog.publication.image_review_finished',
+        itemId: payload.itemId,
+        imageId: payload.imageId,
+        version: payload.version,
+        moderationStatus: moderation.status,
+        publicationImageStatus,
+      });
 
       await this.applyImageModerationResult(
         payload.itemId,
-        moderation.status ?? CatalogImageModerationStatus.ERROR,
+        publicationImageStatus,
       );
     } catch (error) {
+      this.logger.warn({
+        event: 'catalog.publication.image_review_failed',
+        itemId: payload.itemId,
+        imageId: payload.imageId,
+        version: payload.version,
+        error: error instanceof Error ? error.message : 'unknown_error',
+      });
       await this.markImageError(payload.itemId, payload.version);
     }
 
+    await this.maybeQueueTextModerationAfterImages(payload.itemId, payload.version);
     await this.finalizePublicationReview(payload.itemId, payload.version);
   }
 
@@ -246,14 +355,10 @@ export class CatalogPublicationModerationService {
     itemId: string,
     result: CatalogTextModerationResult,
   ) {
-    const nextStatus =
-      result.recommendedAction === 'APPROVE'
-        ? 'APPROVED'
-        : result.recommendedAction === 'REMOVE_PRODUCT'
-          ? 'BLOCKED'
-          : 'NEEDS_REVIEW';
+    const nextStatus = this.resolvePublicationTextStatus(result);
 
-    const client = await this.queueService.getSystemQueue().client;
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
     await client.hset(this.buildStateKey(itemId), {
       textStatus: nextStatus,
       textFlags: JSON.stringify(result.flags ?? []),
@@ -263,11 +368,49 @@ export class CatalogPublicationModerationService {
     });
   }
 
+  private resolvePublicationTextStatus(result: CatalogTextModerationResult) {
+    if (result.recommendedAction === 'APPROVE') {
+      return 'APPROVED';
+    }
+
+    if (result.recommendedAction !== 'REMOVE_PRODUCT') {
+      return 'NEEDS_REVIEW';
+    }
+
+    const normalizedFlags = new Set(
+      (result.flags ?? []).map((flag) => flag.toUpperCase()),
+    );
+    const hasHardBlockFlag = Array.from(normalizedFlags).some((flag) =>
+      HARD_BLOCK_TEXT_FLAGS.has(flag),
+    );
+
+    return hasHardBlockFlag ? 'BLOCKED' : 'NEEDS_REVIEW';
+  }
+
+  private resolvePublicationImageStatus(
+    status: CatalogImageModerationStatus,
+    flags: string[],
+  ) {
+    if (status !== CatalogImageModerationStatus.BLOCKED) {
+      return status;
+    }
+
+    const normalizedFlags = new Set(flags.map((flag) => flag.toUpperCase()));
+    const hasHardBlockFlag = Array.from(normalizedFlags).some((flag) =>
+      HARD_BLOCK_IMAGE_FLAGS.has(flag),
+    );
+
+    return hasHardBlockFlag
+      ? CatalogImageModerationStatus.BLOCKED
+      : CatalogImageModerationStatus.NEEDS_REVIEW;
+  }
+
   private async applyImageModerationResult(
     itemId: string,
     status: CatalogImageModerationStatus,
   ) {
-    const client = await this.queueService.getSystemQueue().client;
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
     const key = this.buildStateKey(itemId);
 
     await client.hincrby(key, 'pendingImages', -1);
@@ -288,6 +431,59 @@ export class CatalogPublicationModerationService {
     }
   }
 
+  private async maybeQueueTextModerationAfterImages(
+    itemId: string,
+    version: string,
+  ) {
+    const state = await this.getState(itemId);
+
+    if (
+      !state ||
+      state.version !== version ||
+      state.pendingImages > 0 ||
+      state.textStatus !== 'WAITING_IMAGES'
+    ) {
+      return;
+    }
+
+    if (state.blockedImages > 0) {
+      return;
+    }
+
+    const item = await this.prismaService.catalogItem.findUnique({
+      where: { id: itemId },
+      select: {
+        ownerUserId: true,
+        title: true,
+        description: true,
+        exchangePreferences: true,
+      },
+    });
+
+    if (!item) {
+      return;
+    }
+
+    const text = this.buildModerationText(item);
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
+    await client.hset(this.buildStateKey(itemId), {
+      textStatus: text ? 'QUEUED' : 'APPROVED',
+      textErrorMessage: '',
+    });
+
+    if (!text) {
+      return;
+    }
+
+    await this.queueTextModerationJob({
+      itemId,
+      userId: item.ownerUserId,
+      text,
+      version,
+    });
+  }
+
   private async markImageError(itemId: string, version: string) {
     const state = await this.getState(itemId);
 
@@ -295,18 +491,36 @@ export class CatalogPublicationModerationService {
       return;
     }
 
-    const client = await this.queueService.getSystemQueue().client;
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
     const key = this.buildStateKey(itemId);
     await client.hincrby(key, 'pendingImages', -1);
     await client.hincrby(key, 'errorImages', 1);
   }
 
   private async setTextError(itemId: string, errorMessage: string) {
-    const client = await this.queueService.getSystemQueue().client;
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
     await client.hset(this.buildStateKey(itemId), {
       textStatus: 'ERROR',
       textErrorMessage: errorMessage,
     });
+  }
+
+  private async queueTextModerationJob(payload: {
+    itemId: string;
+    userId: string;
+    text: string;
+    version: string;
+  }) {
+    await this.queueService.getPublicationModerationQueue().add(
+      CATALOG_TEXT_MODERATION_JOB,
+      payload,
+      {
+        jobId: `${CATALOG_TEXT_MODERATION_JOB}:${payload.itemId}:${payload.version}`,
+        attempts: CATALOG_PUBLICATION_MODERATION_MAX_ATTEMPTS,
+      },
+    );
   }
 
   private async finalizePublicationReview(itemId: string, version: string) {
@@ -370,7 +584,11 @@ export class CatalogPublicationModerationService {
       return CatalogItemPublicationStatus.BLOCKED;
     }
 
-    if (state.pendingImages > 0 || state.textStatus === 'QUEUED') {
+    if (
+      state.pendingImages > 0 ||
+      state.textStatus === 'WAITING_IMAGES' ||
+      state.textStatus === 'QUEUED'
+    ) {
       return CatalogItemPublicationStatus.UNDER_REVIEW;
     }
 
@@ -386,7 +604,7 @@ export class CatalogPublicationModerationService {
     return CatalogItemPublicationStatus.ACTIVE;
   }
 
-  private async emitOwnerNotification(
+  async emitOwnerNotification(
     previousItem: {
       id: string;
       ownerUserId: string;
@@ -489,7 +707,9 @@ export class CatalogPublicationModerationService {
 
     const reasons = Array.from(
       new Set([
-        ...state.textFlags.map((flag) => this.formatModerationFlag(flag)),
+        ...(state.textStatus === 'APPROVED'
+          ? []
+          : state.textFlags.map((flag) => this.formatModerationFlag(flag))),
         ...latestImageModerations.flatMap((moderation) =>
           moderation.flags.map((flag) => this.formatModerationFlag(flag)),
         ),
@@ -503,11 +723,20 @@ export class CatalogPublicationModerationService {
     );
 
     if (!reasons.length) {
-      reasons.push(
-        status === CatalogItemPublicationStatus.BLOCKED
-          ? 'Detectamos señales que incumplen nuestras políticas de publicación.'
-          : 'Detectamos señales que requieren revisión manual antes de publicarla.',
-      );
+      if (
+        status === CatalogItemPublicationStatus.UNDER_REVIEW &&
+        state.pendingImages > 0
+      ) {
+        reasons.push(
+          `Seguimos validando ${state.pendingImages} imagen${state.pendingImages === 1 ? '' : 'es'} de la publicación.`,
+        );
+      } else {
+        reasons.push(
+          status === CatalogItemPublicationStatus.BLOCKED
+            ? 'Detectamos señales que incumplen nuestras políticas de publicación.'
+            : 'Detectamos señales que requieren revisión manual antes de publicarla.',
+        );
+      }
     }
 
     return {
@@ -526,6 +755,7 @@ export class CatalogPublicationModerationService {
       reasons,
       details: {
         textStatus: state.textStatus,
+        pendingImages: state.pendingImages,
         blockedImages: state.blockedImages,
         reviewImages: state.reviewImages,
         errorImages: state.errorImages,
@@ -543,6 +773,7 @@ export class CatalogPublicationModerationService {
       reasons: ['Validación automática de texto e imágenes en curso.'],
       details: {
         textStatus: 'QUEUED',
+        pendingImages: 0,
         blockedImages: 0,
         reviewImages: 0,
         errorImages: 0,
@@ -562,7 +793,8 @@ export class CatalogPublicationModerationService {
   private async getState(
     itemId: string,
   ): Promise<PublicationModerationState | null> {
-    const client = await this.queueService.getSystemQueue().client;
+    const client =
+      await this.queueService.getPublicationModerationQueue().client;
     const raw = await client.hgetall(this.buildStateKey(itemId));
 
     if (!raw.version) {
@@ -615,9 +847,18 @@ export class CatalogPublicationModerationService {
       case 'WEAPON':
       case 'WEAPONS':
         return 'Detectamos referencias a armas o elementos prohibidos.';
+      case 'KNIFE':
+        return 'Detectamos un objeto que podria parecer un cuchillo o elemento cortopunzante. La imagen quedo en revision manual para confirmarlo.';
       case 'SCAM':
       case 'FRAUD':
         return 'Detectamos señales asociadas a fraude o engaño.';
+      case 'VISIBLE_TEXT':
+        return 'Detectamos texto visible dentro de una imagen y necesitamos revisarlo manualmente.';
+      case 'LOGO':
+        return 'Detectamos un logo o marca visible en una imagen y necesitamos revisarlo manualmente.';
+      case 'WATERMARK':
+      case 'STORE_WATERMARK':
+        return 'Detectamos una marca de agua en una imagen y necesitamos revisarla manualmente.';
       case 'OFF_PLATFORM':
       case 'EXTERNAL_LINK':
         return 'Detectamos intentos de mover la conversación fuera de Truo.';
